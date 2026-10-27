@@ -8,8 +8,7 @@ const {
   ButtonBuilder,
   ButtonStyle,
   ChannelType,
-  SlashCommandBuilder,
-  AttachmentBuilder
+  SlashCommandBuilder
 } = require("discord.js");
 
 const fs = require("fs");
@@ -17,8 +16,6 @@ const http = require("http");
 
 const PREFIX = "b!";
 const DATA_FILE = "./welcome-config.json";
-const WELCOME_IMAGE = "./redkings-banner.jpeg";
-const RED = 0xed1c24;
 
 const client = new Client({
   intents: [
@@ -32,7 +29,7 @@ const client = new Client({
 });
 
 // ======================================================
-// DATOS
+// BASE DE DATOS JSON
 // ======================================================
 
 let data = {};
@@ -40,32 +37,40 @@ let data = {};
 if (fs.existsSync(DATA_FILE)) {
   try {
     data = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
-  } catch (error) {
-    console.error("❌ Error leyendo welcome-config.json:", error);
+  } catch {
     data = {};
   }
 }
 
 const defaults = () => ({
   welcomeChannel: null,
-  goodbyeChannel: null,
   autoRole: null,
   logsChannel: null,
   inviteChannel: null,
+
   autoReplies: {},
   autoReactions: {},
   warnings: {},
+
   maintenance: false,
+
   inviteUsers: {},
   memberInviters: {},
-  giveaways: {}
+
+  giveaways: {},
+
+  // NUEVO: CONTADOR DE MENSAJES PARA REQUISITOS
+  messageCounts: {},
+
+  // NUEVO: SISTEMA DE ROLES INTERACTIVOS
+  reactionRoles: {}
 });
 
 function saveData() {
   try {
     fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
   } catch (error) {
-    console.error("❌ Error guardando datos:", error);
+    console.error("Error guardando datos:", error);
   }
 }
 
@@ -77,9 +82,9 @@ function getGuildData(id) {
 
   const def = defaults();
 
-  for (const [key, value] of Object.entries(def)) {
+  for (const key of Object.keys(def)) {
     if (data[id][key] === undefined) {
-      data[id][key] = value;
+      data[id][key] = def[key];
     }
   }
 
@@ -99,9 +104,9 @@ function isAdmin(member) {
 async function adminOnlyMessage(message) {
   if (isAdmin(message.member)) return true;
 
-  await message.reply({
-    content: "🚫 Solo los administradores pueden usar los comandos de Fusake."
-  }).catch(() => {});
+  await message.reply(
+    "🚫 Solo los administradores pueden usar los comandos de Fusake."
+  ).catch(() => {});
 
   return false;
 }
@@ -109,17 +114,10 @@ async function adminOnlyMessage(message) {
 async function adminOnlyInteraction(interaction) {
   if (isAdmin(interaction.member)) return true;
 
-  if (interaction.replied || interaction.deferred) {
-    await interaction.followUp({
-      content: "🚫 Solo los administradores pueden usar esta función.",
-      ephemeral: true
-    }).catch(() => {});
-  } else {
-    await interaction.reply({
-      content: "🚫 Solo los administradores pueden usar esta función.",
-      ephemeral: true
-    }).catch(() => {});
-  }
+  await interaction.reply({
+    content: "🚫 Solo los administradores pueden usar este comando.",
+    ephemeral: true
+  }).catch(() => {});
 
   return false;
 }
@@ -129,19 +127,19 @@ const mentionedRole = message => message.mentions.roles.first();
 const mentionedChannel = message => message.mentions.channels.first();
 
 function duration(ms) {
-  const seconds = Math.floor(ms / 1000);
+  const s = Math.floor(ms / 1000);
 
-  const days = Math.floor(seconds / 86400);
-  const hours = Math.floor((seconds % 86400) / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  const secs = seconds % 60;
+  const days = Math.floor(s / 86400);
+  const hours = Math.floor((s % 86400) / 3600);
+  const minutes = Math.floor((s % 3600) / 60);
+  const seconds = s % 60;
 
   const parts = [];
 
   if (days) parts.push(`${days}d`);
   if (hours) parts.push(`${hours}h`);
   if (minutes) parts.push(`${minutes}m`);
-  if (secs || !parts.length) parts.push(`${secs}s`);
+  if (seconds || !parts.length) parts.push(`${seconds}s`);
 
   return parts.join(" ");
 }
@@ -150,6 +148,7 @@ function parseDuration(input) {
   if (!input) return null;
 
   const clean = input.toLowerCase().replace(/\s+/g, "");
+
   const regex = /(\d+)(d|h|m|s)/g;
 
   let total = 0;
@@ -176,7 +175,7 @@ function parseDuration(input) {
 function parseColor(input) {
   if (!input) return null;
 
-  const value = input.replace("#", "").trim();
+  const value = input.replace("#", "");
 
   if (!/^[0-9a-fA-F]{6}$/.test(value)) return null;
 
@@ -188,6 +187,7 @@ function shuffle(array) {
 
   for (let i = arr.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
+
     [arr[i], arr[j]] = [arr[j], arr[i]];
   }
 
@@ -195,42 +195,229 @@ function shuffle(array) {
 }
 
 // ======================================================
-// LOGS ROJOS
+// NUEVO: REQUISITOS DE SORTEOS
 // ======================================================
 
-async function sendLog(guild, title, description) {
+function parseRequirements(text) {
+  const requirements = {
+    invites: 0,
+    messages: 0,
+    raw: text || ""
+  };
+
+  if (!text || !text.trim()) {
+    return requirements;
+  }
+
+  const lower = text.toLowerCase();
+
+  const inviteMatch = lower.match(
+    /(\d+)\s*(invite|invites|invitacion|invitación|invitaciones)/
+  );
+
+  const messageMatch = lower.match(
+    /(\d+)\s*(mensaje|mensajes|message|messages)/
+  );
+
+  if (inviteMatch) {
+    requirements.invites = Number(inviteMatch[1]);
+  }
+
+  if (messageMatch) {
+    requirements.messages = Number(messageMatch[1]);
+  }
+
+  return requirements;
+}
+
+function requirementText(giveaway) {
+  const req = giveaway.requirements;
+
+  if (!req || (!req.invites && !req.messages)) {
+    return "Ninguno";
+  }
+
+  const list = [];
+
+  if (req.invites) {
+    list.push(`🔗 **${req.invites} invitaciones**`);
+  }
+
+  if (req.messages) {
+    list.push(`💬 **${req.messages} mensajes**`);
+  }
+
+  return list.join("\n");
+}
+
+function getUserInviteCount(guild, userId) {
+  const d = getGuildData(guild.id);
+  const stats = inviteStats(d, userId);
+
+  return stats.members.filter(id =>
+    guild.members.cache.has(id)
+  ).length;
+}
+
+function getUserMessageCount(guild, userId) {
+  const d = getGuildData(guild.id);
+
+  return d.messageCounts[userId] || 0;
+}
+
+function checkGiveawayRequirements(guild, userId, giveaway) {
+  const requirements = giveaway.requirements || {
+    invites: 0,
+    messages: 0
+  };
+
+  const currentInvites = getUserInviteCount(guild, userId);
+  const currentMessages = getUserMessageCount(guild, userId);
+
+  const failed = [];
+
+  if (
+    requirements.invites > 0 &&
+    currentInvites < requirements.invites
+  ) {
+    failed.push(
+      `🔗 Invitaciones: **${currentInvites}/${requirements.invites}**`
+    );
+  }
+
+  if (
+    requirements.messages > 0 &&
+    currentMessages < requirements.messages
+  ) {
+    failed.push(
+      `💬 Mensajes: **${currentMessages}/${requirements.messages}**`
+    );
+  }
+
+  return {
+    ok: failed.length === 0,
+    failed,
+    currentInvites,
+    currentMessages
+  };
+}
+
+// ======================================================
+// NUEVO: ROLES INTERACTIVOS
+// ======================================================
+
+function getReactionRolePanel(d, messageId) {
+  return d.reactionRoles?.[messageId] || null;
+}
+
+function makeReactionRoleComponents(panel) {
+  if (!panel || !Array.isArray(panel.options)) {
+    return [];
+  }
+
+  if (panel.type === "MENU") {
+    const options = panel.options.slice(0, 25).map(option => {
+      const item = {
+        label: option.label.slice(0, 100),
+        value: option.roleId,
+        description: `Obtener el rol ${option.label}`.slice(0, 100)
+      };
+
+      if (option.emoji) {
+        item.emoji = option.emoji;
+      }
+
+      return item;
+    });
+
+    if (!options.length) return [];
+
+    return [
+      new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId(`reacrol_menu:${panel.messageId}`)
+          .setPlaceholder("Selecciona un rol...")
+          .setMinValues(1)
+          .setMaxValues(1)
+          .addOptions(options)
+      )
+    ];
+  }
+
+  if (panel.type === "BOTON") {
+    const rows = [];
+    const options = panel.options.slice(0, 25);
+
+    for (let i = 0; i < options.length; i += 5) {
+      const row = new ActionRowBuilder();
+
+      for (const option of options.slice(i, i + 5)) {
+        const button = new ButtonBuilder()
+          .setCustomId(
+            `reacrol_button:${panel.messageId}:${option.roleId}`
+          )
+          .setLabel(option.label.slice(0, 80))
+          .setStyle(ButtonStyle.Secondary);
+
+        if (option.emoji) {
+          button.setEmoji(option.emoji);
+        }
+
+        row.addComponents(button);
+      }
+
+      rows.push(row);
+    }
+
+    return rows;
+  }
+
+  return [];
+}
+
+async function updateReactionRoleMessage(guild, panel) {
+  const channel = guild.channels.cache.get(panel.channelId);
+
+  if (!channel?.isTextBased()) {
+    throw new Error("CHANNEL_NOT_FOUND");
+  }
+
+  const message = await channel.messages.fetch(panel.messageId);
+
+  const components = makeReactionRoleComponents(panel);
+
+  await message.edit({
+    components
+  });
+
+  return message;
+}
+
+// ======================================================
+// LOGS
+// ======================================================
+
+async function sendLog(guild, title, description, color = 0x3498db) {
   const d = getGuildData(guild.id);
 
   if (!d.logsChannel) return;
 
-  const channel = guild.channels.cache.get(d.logsChannel);
+  const c = guild.channels.cache.get(d.logsChannel);
 
-  if (!channel) {
-    console.error(`❌ LOGS: No existe el canal ${d.logsChannel}`);
-    return;
-  }
+  if (!c || !c.isTextBased()) return;
 
-  if (!channel.isTextBased()) {
-    console.error("❌ LOGS: El canal configurado no es de texto.");
-    return;
-  }
-
-  try {
-    await channel.send({
-      embeds: [
-        new EmbedBuilder()
-          .setColor(RED)
-          .setTitle(`♦️♟️ ${title} 🃏`)
-          .setDescription(description.slice(0, 4000))
-          .setFooter({
-            text: "♦️ RED KINGS • ♟️ Fusake 🃏"
-          })
-          .setTimestamp()
-      ]
-    });
-  } catch (error) {
-    console.error(`❌ Error enviando log en #${channel.name}:`, error);
-  }
+  await c.send({
+    embeds: [
+      new EmbedBuilder()
+        .setColor(color)
+        .setTitle(`♟️🃏 ${title}`)
+        .setDescription(description.slice(0, 4000))
+        .setFooter({
+          text: "♟️ Fusake • 🃏 Redkings"
+        })
+        .setTimestamp()
+    ]
+  }).catch(() => {});
 }
 
 // ======================================================
@@ -262,17 +449,15 @@ const help = {
   ],
 
   configuracion: [
-    "♦️⚙️ CONFIGURACIÓN",
+    "⚙️ CONFIGURACIÓN",
     "b!bienvenida #canal",
     "b!bienvenida off",
-    "b!despedida #canal",
-    "b!despedida off",
-    "b!invite #canal",
-    "b!invite off",
-    "b!logs #canal",
-    "b!logs off",
     "b!autoroles @rol",
     "b!clearautorole",
+    "b!logs #canal",
+    "b!clearlogs",
+    "b!invite #canal",
+    "b!invite off",
     "b!autorespuestas palabra respuesta",
     "b!autoreacciones palabra emoji",
     "b!delreply palabra",
@@ -281,11 +466,12 @@ const help = {
     "b!maintenanceon",
     "b!maintenanceoff",
     "b!config",
-    "b!resetconfig"
+    "b!resetconfig",
+    "/reacrol"
   ],
 
   servidor: [
-    "🏠♟️ SERVIDOR",
+    "🏠 SERVIDOR",
     "b!serverinfo",
     "b!userinfo @usuario",
     "b!roleinfo @rol",
@@ -310,7 +496,7 @@ const help = {
   ],
 
   staff: [
-    "🃏🧰 HERRAMIENTAS DE STAFF",
+    "🃏🧰 STAFF",
     "b!say mensaje",
     "b!announce mensaje",
     "b!embed #COLOR mensaje",
@@ -332,33 +518,33 @@ const help = {
   ],
 
   sorteos: [
-    "🎉🃏 SORTEOS",
+    "🎉 SORTEOS",
     "b!sorteo 1h30m 2 Premio",
+    "b!sorteo 1h30m 2 Premio | 5 invites, 1000 mensajes",
     "/sorteo",
     "b!sorteoend ID",
     "/sorteo-end",
     "b!sorteoreroll ID",
     "/sorteo-reroll",
     "",
-    "🎉 Botón Participar",
-    "👥 Botón Ver participantes"
+    "🎉 Participar — disponible para miembros",
+    "👥 Ver participantes — disponible para miembros"
   ],
 
   invitaciones: [
-    "🔗♦️ INVITACIONES",
+    "🔗 INVITACIONES",
     "b!invite #canal",
     "/invite",
     "b!invites @usuario",
     "/invites",
     "",
-    "🆕 Nuevas",
-    "🚪 Salieron",
-    "👥 Siguen en el servidor",
-    "📋 Lista de invitados"
+    "Nuevas = personas que invitó",
+    "Salieron = invitados que abandonaron",
+    "En servidor = invitados que siguen dentro"
   ],
 
   bot: [
-    "🤖♟️ BOT",
+    "🤖 BOT",
     "b!help",
     "/help",
     "b!ping",
@@ -429,31 +615,31 @@ function helpMenu() {
 
 function helpEmbed() {
   return new EmbedBuilder()
-    .setColor(RED)
-    .setTitle("♦️♟️ FUSAKE • PANEL ADMINISTRATIVO 🃏")
+    .setColor(0xf1c40f)
+    .setTitle("♟️🃏 FUSAKE • PANEL ADMINISTRATIVO")
     .setDescription(
-`╔══════════════════════╗
+      `╔══════════════════════╗
       ♟️ AJEDREZ + PÓKER 🃏
 ╚══════════════════════╝
 
-⚡ **Prefijo:** \`${PREFIX}\`
-🤖 **Slash:** \`/\`
+**Prefijo:** \`${PREFIX}\`
+**Slash commands:** \`/\`
 
-👑 **Acceso exclusivo para administradores**
+👑 **Panel exclusivo para administradores**
 
 ♟️ Mueve tus piezas.
 🃏 Juega tus cartas.
 
-Selecciona una categoría en el menú.`
+Selecciona una categoría en el menú inferior.`
     )
     .setFooter({
-      text: "♦️ RED KINGS • ♟️ Fusake 🃏"
+      text: "♟️🃏 Fusake • La partida continúa..."
     })
     .setTimestamp();
 }
 
 // ======================================================
-// INVITES
+// INVITACIONES
 // ======================================================
 
 const inviteCache = new Map();
@@ -471,12 +657,9 @@ async function cacheInvites(guild) {
         ])
       )
     );
-
-    console.log(`🔗 Invites cargados: ${guild.name}`);
   } catch (error) {
-    console.error(
-      `❌ No pude cargar invites de ${guild.name}:`,
-      error
+    console.log(
+      `⚠️ No pude obtener invites de ${guild.name}: ${error.message}`
     );
   }
 }
@@ -510,8 +693,7 @@ async function detectInvite(guild) {
     );
 
     return used;
-  } catch (error) {
-    console.error("❌ Error detectando invitación:", error);
+  } catch {
     return null;
   }
 }
@@ -553,19 +735,23 @@ function giveawayEmbed(giveaway) {
   const endUnix = Math.floor(giveaway.endAt / 1000);
 
   return new EmbedBuilder()
-    .setColor(RED)
-    .setTitle("🎉♦️ SORTEO • RED KINGS ♟️🃏")
+    .setColor(0xf1c40f)
+    .setTitle("🎉🃏 SORTEO • FUSAKE ♟️🎉")
     .setDescription(
-`🏆 **Premio**
+      `🏆 **Premio**
 ${giveaway.prize}
 
 👑 **Ganadores:** ${giveaway.winners}
+
 👥 **Participantes:** ${giveaway.participants.length}
+
+📋 **Requisitos**
+${requirementText(giveaway)}
 
 ⏰ **Finaliza:** <t:${endUnix}:R>
 📅 <t:${endUnix}:F>
 
-🎉 Pulsa **Participar** para entrar.`
+🎉 Pulsa **Participar** para entrar al sorteo.`
     )
     .setFooter({
       text: `ID: ${giveaway.id} • ♟️ Fusake 🃏`
@@ -574,17 +760,12 @@ ${giveaway.prize}
 
 function selectWinners(giveaway) {
   return shuffle(giveaway.participants)
-    .slice(
-      0,
-      Math.min(
-        giveaway.winners,
-        giveaway.participants.length
-      )
-    );
+    .slice(0, Math.min(giveaway.winners, giveaway.participants.length));
 }
 
 async function endGiveaway(guild, giveawayId, reroll = false) {
   const d = getGuildData(guild.id);
+
   const giveaway = d.giveaways[giveawayId];
 
   if (!giveaway) {
@@ -615,7 +796,6 @@ async function endGiveaway(guild, giveawayId, reroll = false) {
   if (!reroll) {
     giveaway.ended = true;
     giveaway.lastWinners = winners;
-
     saveData();
 
     try {
@@ -624,20 +804,23 @@ async function endGiveaway(guild, giveawayId, reroll = false) {
       await msg.edit({
         embeds: [
           new EmbedBuilder()
-            .setColor(RED)
-            .setTitle("🎉♦️ SORTEO FINALIZADO")
+            .setColor(0xe74c3c)
+            .setTitle("🎉🃏 SORTEO FINALIZADO")
             .setDescription(
-`🏆 **Premio**
+              `🏆 **Premio**
 ${giveaway.prize}
 
 👑 **Ganadores**
 ${
   winners.length
     ? winners.map(id => `<@${id}>`).join("\n")
-    : "No hubo participantes."
+    : "No hubo suficientes participantes."
 }
 
-👥 **Participantes:** ${giveaway.participants.length}`
+👥 Participantes: **${giveaway.participants.length}**
+
+📋 **Requisitos**
+${requirementText(giveaway)}`
             )
             .setFooter({
               text: `ID: ${giveaway.id} • ♟️ Fusake 🃏`
@@ -646,34 +829,17 @@ ${
         ],
         components: [giveawayButtons(giveaway.id, true)]
       });
-    } catch (error) {
-      console.error("❌ Error editando sorteo:", error);
-    }
+    } catch {}
 
     if (winners.length) {
-      await channel.send({
-        content:
-          `🎊 ¡Felicidades ${winners
-            .map(id => `<@${id}>`)
-            .join(", ")}! Ganaron **${giveaway.prize}**.`
-      }).catch(console.error);
+      await channel.send(
+        `🎊 ¡Felicidades ${winners.map(id => `<@${id}>`).join(", ")}! Ganaron **${giveaway.prize}**.`
+      ).catch(() => {});
     } else {
-      await channel.send({
-        content: `🃏 El sorteo de **${giveaway.prize}** terminó sin participantes.`
-      }).catch(console.error);
+      await channel.send(
+        `🃏 El sorteo **${giveaway.prize}** terminó sin participantes suficientes.`
+      ).catch(() => {});
     }
-
-    await sendLog(
-      guild,
-      "SORTEO FINALIZADO",
-      `🏆 **Premio:** ${giveaway.prize}
-👥 **Participantes:** ${giveaway.participants.length}
-👑 **Ganadores:** ${
-        winners.length
-          ? winners.map(id => `<@${id}>`).join(", ")
-          : "Ninguno"
-      }`
-    );
   } else {
     if (!giveaway.ended) {
       return {
@@ -686,12 +852,11 @@ ${
     saveData();
 
     if (winners.length) {
-      await channel.send({
-        content:
-          `🔄🎉 **Nuevos ganadores de ${giveaway.prize}:** ${winners
-            .map(id => `<@${id}>`)
-            .join(", ")}`
-      }).catch(console.error);
+      await channel.send(
+        `🔄🎉 **Nuevos ganadores de ${giveaway.prize}:** ${winners
+          .map(id => `<@${id}>`)
+          .join(", ")}`
+      ).catch(() => {});
     }
   }
 
@@ -707,11 +872,24 @@ async function createGiveaway(
   creatorId,
   time,
   winners,
-  prize
+  prize,
+  requirementsText = ""
 ) {
+  if (!time || time < 1000) {
+    throw new Error("INVALID_TIME");
+  }
+
+  if (!Number.isInteger(winners) || winners < 1 || winners > 50) {
+    throw new Error("INVALID_WINNERS");
+  }
+
+  if (!prize) {
+    throw new Error("INVALID_PRIZE");
+  }
+
   const d = getGuildData(guild.id);
 
-  const id = Date.now().toString();
+  const id = `${Date.now()}`;
 
   const giveaway = {
     id,
@@ -722,6 +900,7 @@ async function createGiveaway(
     prize,
     winners,
     participants: [],
+    requirements: parseRequirements(requirementsText),
     createdAt: Date.now(),
     endAt: Date.now() + time,
     ended: false,
@@ -740,8 +919,7 @@ async function createGiveaway(
   saveData();
 
   setTimeout(async () => {
-    const latest =
-      getGuildData(guild.id).giveaways[id];
+    const latest = getGuildData(guild.id).giveaways[id];
 
     if (latest && !latest.ended) {
       await endGiveaway(guild, id);
@@ -758,15 +936,15 @@ async function createGiveaway(
 const slashCommands = [
   new SlashCommandBuilder()
     .setName("help")
-    .setDescription("Panel administrativo de Fusake"),
+    .setDescription("Abre el panel administrativo de Fusake"),
 
   new SlashCommandBuilder()
     .setName("ping")
-    .setDescription("Muestra la latencia de Fusake"),
+    .setDescription("Muestra la latencia del bot"),
 
   new SlashCommandBuilder()
     .setName("uptime")
-    .setDescription("Tiempo encendido"),
+    .setDescription("Muestra cuánto tiempo lleva encendido Fusake"),
 
   new SlashCommandBuilder()
     .setName("botinfo")
@@ -774,23 +952,23 @@ const slashCommands = [
 
   new SlashCommandBuilder()
     .setName("embed")
-    .setDescription("Crea un embed personalizado")
+    .setDescription("Envía un embed personalizado")
     .addStringOption(option =>
       option
         .setName("color")
-        .setDescription("Ejemplo: #ff0000")
+        .setDescription("Color hexadecimal, ejemplo #ff0000")
         .setRequired(true)
     )
     .addStringOption(option =>
       option
         .setName("mensaje")
-        .setDescription("Mensaje")
+        .setDescription("Contenido del embed")
         .setRequired(true)
     ),
 
   new SlashCommandBuilder()
     .setName("bienvenida")
-    .setDescription("Configura las bienvenidas")
+    .setDescription("Configura el canal de bienvenida")
     .addChannelOption(option =>
       option
         .setName("canal")
@@ -800,27 +978,12 @@ const slashCommands = [
     .addBooleanOption(option =>
       option
         .setName("desactivar")
-        .setDescription("Desactivar bienvenidas")
-    ),
-
-  new SlashCommandBuilder()
-    .setName("despedida")
-    .setDescription("Configura las despedidas")
-    .addChannelOption(option =>
-      option
-        .setName("canal")
-        .setDescription("Canal de despedidas")
-        .addChannelTypes(ChannelType.GuildText)
-    )
-    .addBooleanOption(option =>
-      option
-        .setName("desactivar")
-        .setDescription("Desactivar despedidas")
+        .setDescription("Desactivar las bienvenidas")
     ),
 
   new SlashCommandBuilder()
     .setName("logs")
-    .setDescription("Configura los logs")
+    .setDescription("Configura el canal de logs")
     .addChannelOption(option =>
       option
         .setName("canal")
@@ -830,7 +993,7 @@ const slashCommands = [
     .addBooleanOption(option =>
       option
         .setName("desactivar")
-        .setDescription("Desactivar logs")
+        .setDescription("Desactivar los logs")
     ),
 
   new SlashCommandBuilder()
@@ -844,16 +1007,16 @@ const slashCommands = [
     .addBooleanOption(option =>
       option
         .setName("desactivar")
-        .setDescription("Desactivar autorol")
+        .setDescription("Desactivar el autorol")
     ),
 
   new SlashCommandBuilder()
     .setName("invite")
-    .setDescription("Configura mensajes de invitaciones")
+    .setDescription("Configura el canal de mensajes de invitaciones")
     .addChannelOption(option =>
       option
         .setName("canal")
-        .setDescription("Canal de invitaciones")
+        .setDescription("Canal donde aparecerán las nuevas invitaciones")
         .addChannelTypes(ChannelType.GuildText)
     )
     .addBooleanOption(option =>
@@ -864,11 +1027,57 @@ const slashCommands = [
 
   new SlashCommandBuilder()
     .setName("invites")
-    .setDescription("Consulta las invitaciones")
+    .setDescription("Muestra las invitaciones de un usuario")
     .addUserOption(option =>
       option
         .setName("usuario")
-        .setDescription("Usuario a consultar")
+        .setDescription("Usuario")
+        .setRequired(false)
+    ),
+
+  // NUEVO REACROL
+  new SlashCommandBuilder()
+    .setName("reacrol")
+    .setDescription("Agrega un rol interactivo a un mensaje")
+    .addStringOption(option =>
+      option
+        .setName("id_mensaje")
+        .setDescription("ID del mensaje donde irá el menú o botón")
+        .setRequired(true)
+    )
+    .addRoleOption(option =>
+      option
+        .setName("rol")
+        .setDescription("Rol que se otorgará")
+        .setRequired(true)
+    )
+    .addStringOption(option =>
+      option
+        .setName("emoji")
+        .setDescription("Emoji de la opción")
+        .setRequired(true)
+    )
+    .addStringOption(option =>
+      option
+        .setName("tipo")
+        .setDescription("Menú o botón")
+        .setRequired(true)
+        .addChoices(
+          {
+            name: "Menú",
+            value: "MENU"
+          },
+          {
+            name: "Botón",
+            value: "BOTON"
+          }
+        )
+    )
+    .addStringOption(option =>
+      option
+        .setName("mensaje")
+        .setDescription("Nombre que aparecerá en la opción")
+        .setRequired(true)
     ),
 
   new SlashCommandBuilder()
@@ -891,8 +1100,14 @@ const slashCommands = [
     .addStringOption(option =>
       option
         .setName("premio")
-        .setDescription("Premio")
+        .setDescription("Premio del sorteo")
         .setRequired(true)
+    )
+    .addStringOption(option =>
+      option
+        .setName("requisitos")
+        .setDescription("Ej: 5 invites, 1000 mensajes")
+        .setRequired(false)
     ),
 
   new SlashCommandBuilder()
@@ -907,7 +1122,7 @@ const slashCommands = [
 
   new SlashCommandBuilder()
     .setName("sorteo-reroll")
-    .setDescription("Selecciona nuevos ganadores")
+    .setDescription("Elige nuevos ganadores")
     .addStringOption(option =>
       option
         .setName("id")
@@ -965,7 +1180,7 @@ const slashCommands = [
 
   new SlashCommandBuilder()
     .setName("untimeout")
-    .setDescription("Retira timeout")
+    .setDescription("Retira un timeout")
     .addUserOption(option =>
       option
         .setName("usuario")
@@ -979,7 +1194,7 @@ const slashCommands = [
     .addIntegerOption(option =>
       option
         .setName("cantidad")
-        .setDescription("Cantidad")
+        .setDescription("1-100")
         .setMinValue(1)
         .setMaxValue(100)
         .setRequired(true)
@@ -1024,6 +1239,7 @@ client.once("ready", async () => {
 
   try {
     await client.application.commands.set(slashCommands);
+
     console.log("✅ Slash commands registrados.");
   } catch (error) {
     console.error("❌ Error registrando slash commands:", error);
@@ -1043,8 +1259,7 @@ client.once("ready", async () => {
         await endGiveaway(guild, giveaway.id);
       } else {
         setTimeout(async () => {
-          const current =
-            getGuildData(guild.id).giveaways[giveaway.id];
+          const current = getGuildData(guild.id).giveaways[giveaway.id];
 
           if (current && !current.ended) {
             await endGiveaway(guild, giveaway.id);
@@ -1055,10 +1270,9 @@ client.once("ready", async () => {
   }
 });
 
-client.on("guildCreate", async guild => {
-  getGuildData(guild.id);
-  await cacheInvites(guild);
-});
+// ======================================================
+// INVITE CREATE / DELETE
+// ======================================================
 
 client.on("inviteCreate", async invite => {
   if (invite.guild) {
@@ -1073,38 +1287,60 @@ client.on("inviteDelete", async invite => {
 });
 
 // ======================================================
-// BIENVENIDAS + INVITES
+// NUEVO MIEMBRO
 // ======================================================
 
 client.on("guildMemberAdd", async member => {
   const d = getGuildData(member.guild.id);
 
-  // AUTOROL
-  if (d.autoRole) {
-    const role = member.guild.roles.cache.get(d.autoRole);
+  if (d.welcomeChannel) {
+    const c = member.guild.channels.cache.get(d.welcomeChannel);
 
-    if (!role) {
-      console.error(`❌ AUTOROL: No existe ${d.autoRole}`);
-    } else if (!role.editable) {
-      console.error(
-        `❌ AUTOROL: Fusake no puede asignar ${role.name}. Revisa la jerarquía.`
-      );
-    } else {
-      try {
-        await member.roles.add(role);
-      } catch (error) {
-        console.error("❌ Error asignando autorol:", error);
-      }
+    if (c?.isTextBased()) {
+      await c.send({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0xf1c40f)
+            .setTitle("♟️🃏 ¡NUEVO JUGADOR EN LA MESA! 🃏♟️")
+            .setDescription(
+              `¡Bienvenido ${member} 👋
+
+Has entrado a ―═★❯❯ RƐɗ KɪƝƓS ♦ .! .
+
+♟️ Mueve tus piezas con estrategia.
+🃏 Juega tus cartas con inteligencia.
+
+¡Esperamos que disfrutes de la comunidad! 🎉🎊
+
+♣️ Pásate por <#1533949497812586646> <#1516922343195148520> <#1523782602379624662> para saber más de ti!!!!
+
+♟️ Tu próximo movimiento puede cambiar la partida 🃏`
+            )
+            .setThumbnail(member.user.displayAvatarURL())
+            .setFooter({
+              text: "♟️ Tu próximo movimiento puede cambiar la partida 🃏"
+            })
+            .setTimestamp()
+        ],
+        allowedMentions: {
+          users: [member.id]
+        }
+      }).catch(() => {});
     }
   }
 
-  // DETECTAR INVITE
+  if (d.autoRole) {
+    const role = member.guild.roles.cache.get(d.autoRole);
+
+    if (role?.editable) {
+      await member.roles.add(role).catch(() => {});
+    }
+  }
+
   const usedInvite = await detectInvite(member.guild);
 
-  let inviterId = null;
-
   if (usedInvite?.inviter) {
-    inviterId = usedInvite.inviter.id;
+    const inviterId = usedInvite.inviter.id;
 
     const stats = inviteStats(d, inviterId);
 
@@ -1117,169 +1353,43 @@ client.on("guildMemberAdd", async member => {
     d.memberInviters[member.id] = inviterId;
 
     saveData();
-  }
 
-  // BIENVENIDA
-  if (d.welcomeChannel) {
-    const channel =
-      member.guild.channels.cache.get(d.welcomeChannel);
+    if (d.inviteChannel) {
+      const channel = member.guild.channels.cache.get(d.inviteChannel);
 
-    if (!channel) {
-      console.error(
-        `❌ BIENVENIDA: No existe el canal ${d.welcomeChannel}`
-      );
-    } else if (!channel.isTextBased()) {
-      console.error(
-        "❌ BIENVENIDA: El canal configurado no es de texto."
-      );
-    } else {
-      try {
-        const embed = new EmbedBuilder()
-          .setColor(RED)
-          .setTitle("♦️ ¡NUEVA PIEZA ENTRA A RED KINGS! ♟️")
-          .setDescription(
-`👋 ¡Bienvenido/a ${member}!
+      if (channel?.isTextBased()) {
+        const currentMembers = stats.members.filter(id =>
+          member.guild.members.cache.has(id)
+        ).length;
 
-Has entrado a **―═★❯❯ RƐɗ KɪƝƓS ♦ .! .**
-
-♟️ **Mueve tus piezas con estrategia.**
-🃏 **Juega tus cartas con inteligencia.**
-
-Esperamos que disfrutes de nuestra comunidad. ♥️
-
-♣️ Pásate por <#1533949497812586646> <#1516922343195148520> <#1523782602379624662> para saber más.
-
-👥 Ahora somos **${member.guild.memberCount} miembros**.
-
-♟️ **Tu próximo movimiento puede cambiar la partida.** 🃏`
-          )
-          .setThumbnail(
-            member.user.displayAvatarURL({
-              size: 256
-            })
-          )
-          .setFooter({
-            text: "♦️ RED KINGS • ♟️ Ajedrez + 🃏 Póker"
-          })
-          .setTimestamp();
-
-        const payload = {
-          embeds: [embed],
-          allowedMentions: {
-            users: [member.id]
-          }
-        };
-
-        if (fs.existsSync(WELCOME_IMAGE)) {
-          const banner = new AttachmentBuilder(WELCOME_IMAGE, {
-            name: "redkings-banner.jpeg"
-          });
-
-          embed.setImage("attachment://redkings-banner.jpeg");
-          payload.files = [banner];
-        } else {
-          console.error(
-            "⚠️ No encontré redkings-banner.jpeg. La bienvenida se enviará sin imagen."
-          );
-        }
-
-        await channel.send(payload);
-
-        console.log(`✅ Bienvenida enviada: ${member.user.tag}`);
-      } catch (error) {
-        console.error("❌ Error enviando bienvenida:", error);
-      }
-    }
-  }
-
-  // MENSAJE DE INVITACIÓN
-  if (d.inviteChannel) {
-    const channel =
-      member.guild.channels.cache.get(d.inviteChannel);
-
-    if (!channel) {
-      console.error(
-        `❌ INVITES: No existe el canal ${d.inviteChannel}`
-      );
-    } else if (!channel.isTextBased()) {
-      console.error(
-        "❌ INVITES: El canal configurado no es de texto."
-      );
-    } else {
-      try {
-        if (inviterId) {
-          const stats = inviteStats(d, inviterId);
-
-          const currentMembers =
-            stats.members.filter(id =>
-              member.guild.members.cache.has(id)
-            ).length;
-
-          await channel.send({
-            embeds: [
-              new EmbedBuilder()
-                .setColor(RED)
-                .setTitle("♦️🔗 NUEVA INVITACIÓN ♟️🃏")
-                .setDescription(
-`👋 ${member} se ha unido a **${member.guild.name}**
+        await channel.send({
+          embeds: [
+            new EmbedBuilder()
+              .setColor(0xf1c40f)
+              .setTitle("🃏🔗 NUEVA INVITACIÓN ♟️")
+              .setDescription(
+                `👋 ${member} se ha unido a **${member.guild.name}**
 
 ♟️ **Invitado por:** <@${inviterId}>
-
 🆕 **Nuevas:** ${stats.joins}
 🚪 **Salieron:** ${stats.leaves}
-👥 **Siguen en el servidor:** ${currentMembers}
+👥 **En el servidor:** ${currentMembers}
 
-🏰 **Miembros totales:** ${member.guild.memberCount}
+🏰 **Miembros del servidor:** ${member.guild.memberCount}
 
-♦️ **Una nueva pieza entra en la partida.**`
-                )
-                .setThumbnail(member.user.displayAvatarURL())
-                .setFooter({
-                  text: "♦️ RED KINGS • Sistema de invitaciones"
-                })
-                .setTimestamp()
-            ]
-          });
-        } else {
-          await channel.send({
-            embeds: [
-              new EmbedBuilder()
-                .setColor(RED)
-                .setTitle("♦️🔗 NUEVO MIEMBRO")
-                .setDescription(
-`${member} se ha unido a **${member.guild.name}**.
-
-⚠️ Fusake no pudo determinar qué invitación utilizó.
-
-👥 **Miembros totales:** ${member.guild.memberCount}`
-                )
-                .setThumbnail(member.user.displayAvatarURL())
-                .setTimestamp()
-            ]
-          });
-        }
-
-        console.log(`✅ Invite registrado: ${member.user.tag}`);
-      } catch (error) {
-        console.error("❌ Error enviando invite:", error);
+♟️ Una nueva pieza entra en la partida. 🃏`
+              )
+              .setThumbnail(member.user.displayAvatarURL())
+              .setTimestamp()
+          ]
+        }).catch(() => {});
       }
     }
   }
-
-  await sendLog(
-    member.guild,
-    "MIEMBRO ENTRÓ",
-    `👤 **Usuario:** ${member.user.tag}
-🆔 **ID:** ${member.id}
-🔗 **Invitado por:** ${
-      inviterId ? `<@${inviterId}>` : "No detectado"
-    }
-👥 **Miembros:** ${member.guild.memberCount}`
-  );
 });
 
 // ======================================================
-// DESPEDIDAS
+// MIEMBRO SALE
 // ======================================================
 
 client.on("guildMemberRemove", async member => {
@@ -1287,198 +1397,57 @@ client.on("guildMemberRemove", async member => {
 
   const inviterId = d.memberInviters[member.id];
 
-  if (inviterId) {
-    const stats = inviteStats(d, inviterId);
+  if (!inviterId) return;
 
-    stats.leaves++;
+  const stats = inviteStats(d, inviterId);
 
-    saveData();
+  stats.leaves++;
 
-    if (d.inviteChannel) {
-      const inviteChannel =
-        member.guild.channels.cache.get(d.inviteChannel);
+  saveData();
 
-      if (inviteChannel?.isTextBased()) {
-        try {
-          const currentMembers =
-            stats.members.filter(id =>
-              member.guild.members.cache.has(id)
-            ).length;
+  if (d.inviteChannel) {
+    const channel = member.guild.channels.cache.get(d.inviteChannel);
 
-          await inviteChannel.send({
-            embeds: [
-              new EmbedBuilder()
-                .setColor(RED)
-                .setTitle("♦️🚪 UN INVITADO ABANDONÓ LA MESA")
-                .setDescription(
-`👤 **${member.user.tag}** salió del servidor.
+    if (channel?.isTextBased()) {
+      const currentMembers = stats.members.filter(id =>
+        member.guild.members.cache.has(id)
+      ).length;
 
-♟️ **Fue invitado por:** <@${inviterId}>
+      await channel.send({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0xe74c3c)
+            .setTitle("🚪🃏 INVITADO SALIÓ")
+            .setDescription(
+              `**${member.user.tag}** salió del servidor.
 
+♟️ **Había sido invitado por:** <@${inviterId}>
 🆕 **Nuevas:** ${stats.joins}
 🚪 **Salieron:** ${stats.leaves}
-👥 **Siguen dentro:** ${currentMembers}
-
-♦️ Una pieza abandona el tablero.`
-                )
-                .setThumbnail(member.user.displayAvatarURL())
-                .setTimestamp()
-            ]
-          });
-        } catch (error) {
-          console.error(
-            "❌ Error enviando salida en invites:",
-            error
-          );
-        }
-      }
+👥 **Siguen dentro:** ${currentMembers}`
+            )
+            .setTimestamp()
+        ]
+      }).catch(() => {});
     }
   }
-
-  if (d.goodbyeChannel) {
-    const channel =
-      member.guild.channels.cache.get(d.goodbyeChannel);
-
-    if (!channel) {
-      console.error(
-        `❌ DESPEDIDA: No existe el canal ${d.goodbyeChannel}`
-      );
-    } else if (!channel.isTextBased()) {
-      console.error(
-        "❌ DESPEDIDA: El canal configurado no es de texto."
-      );
-    } else {
-      try {
-        await channel.send({
-          embeds: [
-            new EmbedBuilder()
-              .setColor(RED)
-              .setTitle("♦️🚪 UNA PIEZA ABANDONA RED KINGS")
-              .setDescription(
-`👋 **${member.user.tag}** ha abandonado **${member.guild.name}**.
-
-♟️ Una pieza menos en el tablero.
-🃏 Una carta menos sobre la mesa.
-
-Esperamos volver a verte en otra partida. ♥️
-
-👥 Ahora somos **${member.guild.memberCount} miembros**.`
-              )
-              .setThumbnail(member.user.displayAvatarURL())
-              .setFooter({
-                text: "♦️ RED KINGS • ♟️ Ajedrez + 🃏 Póker"
-              })
-              .setTimestamp()
-          ]
-        });
-
-        console.log(`✅ Despedida enviada: ${member.user.tag}`);
-      } catch (error) {
-        console.error("❌ Error enviando despedida:", error);
-      }
-    }
-  }
-
-  await sendLog(
-    member.guild,
-    "MIEMBRO SALIÓ",
-    `👤 **Usuario:** ${member.user.tag}
-🆔 **ID:** ${member.id}
-♟️ **Invitado por:** ${
-      inviterId ? `<@${inviterId}>` : "No registrado"
-    }
-👥 **Miembros:** ${member.guild.memberCount}`
-  );
 });
 
 // ======================================================
-// LOGS AUTOMÁTICOS
-// ======================================================
-
-client.on("messageDelete", async message => {
-  if (!message.guild || message.author?.bot) return;
-
-  await sendLog(
-    message.guild,
-    "MENSAJE ELIMINADO",
-    `👤 **Usuario:** ${
-      message.author?.tag || "Desconocido"
-    }
-💬 **Canal:** ${message.channel}
-📝 **Mensaje:**
-${message.content?.slice(0, 1500) || "*Sin contenido disponible*"}`
-  );
-});
-
-client.on("messageUpdate", async (oldMessage, newMessage) => {
-  if (!newMessage.guild || newMessage.author?.bot) return;
-
-  if (oldMessage.content === newMessage.content) return;
-
-  await sendLog(
-    newMessage.guild,
-    "MENSAJE EDITADO",
-    `👤 **Usuario:** ${
-      newMessage.author?.tag || "Desconocido"
-    }
-💬 **Canal:** ${newMessage.channel}
-
-**Antes:**
-${oldMessage.content?.slice(0, 1000) || "*No disponible*"}
-
-**Después:**
-${newMessage.content?.slice(0, 1000) || "*No disponible*"}`
-  );
-});
-
-client.on("channelCreate", async channel => {
-  if (!channel.guild) return;
-
-  await sendLog(
-    channel.guild,
-    "CANAL CREADO",
-    `💬 **Canal:** ${channel}
-🆔 **ID:** ${channel.id}`
-  );
-});
-
-client.on("channelDelete", async channel => {
-  if (!channel.guild) return;
-
-  await sendLog(
-    channel.guild,
-    "CANAL ELIMINADO",
-    `💬 **Nombre:** ${channel.name}
-🆔 **ID:** ${channel.id}`
-  );
-});
-
-client.on("roleCreate", async role => {
-  await sendLog(
-    role.guild,
-    "ROL CREADO",
-    `🎭 **Rol:** ${role}
-🆔 **ID:** ${role.id}`
-  );
-});
-
-client.on("roleDelete", async role => {
-  await sendLog(
-    role.guild,
-    "ROL ELIMINADO",
-    `🎭 **Nombre:** ${role.name}
-🆔 **ID:** ${role.id}`
-  );
-});
-
-// ======================================================
-// COMANDOS b!
+// COMANDOS CON PREFIJO
 // ======================================================
 
 client.on("messageCreate", async message => {
   if (message.author.bot || !message.guild) return;
 
   const d = getGuildData(message.guild.id);
+
+  // NUEVO: CONTAR MENSAJES
+  d.messageCounts[message.author.id] =
+    (d.messageCounts[message.author.id] || 0) + 1;
+
+  saveData();
+
   const lower = message.content.toLowerCase();
 
   if (d.autoReplies?.[lower]) {
@@ -1487,20 +1456,19 @@ client.on("messageCreate", async message => {
       allowedMentions: {
         parse: []
       }
-    }).catch(console.error);
+    }).catch(() => {});
   }
 
   if (d.autoReactions?.[lower]) {
-    await message.react(d.autoReactions[lower]).catch(console.error);
+    await message.react(d.autoReactions[lower]).catch(() => {});
   }
 
   if (!message.content.startsWith(PREFIX)) return;
 
-  const args =
-    message.content
-      .slice(PREFIX.length)
-      .trim()
-      .split(/\s+/);
+  const args = message.content
+    .slice(PREFIX.length)
+    .trim()
+    .split(/\s+/);
 
   const cmd = args.shift()?.toLowerCase();
 
@@ -1510,7 +1478,6 @@ client.on("messageCreate", async message => {
 
   const reply = content => message.reply(content);
 
-  // HELP
   if (cmd === "help" || cmd === "ayuda") {
     return reply({
       embeds: [helpEmbed()],
@@ -1518,57 +1485,28 @@ client.on("messageCreate", async message => {
     });
   }
 
-  // BIENVENIDA
   if (cmd === "bienvenida") {
     if (args[0]?.toLowerCase() === "off") {
       d.welcomeChannel = null;
       saveData();
 
-      return reply("♦️ Bienvenidas desactivadas.");
+      return reply("♟️🃏 Bienvenidas desactivadas.");
     }
 
-    const channel = mentionedChannel(message);
+    const c = mentionedChannel(message);
 
-    if (!channel?.isTextBased()) {
+    if (!c) {
       return reply(
-        "❌ Usa **b!bienvenida #canal** o **b!bienvenida off**"
+        `❌ Usa **${PREFIX}bienvenida #canal** o **${PREFIX}bienvenida off**`
       );
     }
 
-    d.welcomeChannel = channel.id;
+    d.welcomeChannel = c.id;
     saveData();
 
-    return reply(
-      `♦️👋 Bienvenidas configuradas en ${channel}.`
-    );
+    return reply(`♟️🃏 Las bienvenidas aparecerán en ${c}.`);
   }
 
-  // DESPEDIDA
-  if (cmd === "despedida") {
-    if (args[0]?.toLowerCase() === "off") {
-      d.goodbyeChannel = null;
-      saveData();
-
-      return reply("♦️ Despedidas desactivadas.");
-    }
-
-    const channel = mentionedChannel(message);
-
-    if (!channel?.isTextBased()) {
-      return reply(
-        "❌ Usa **b!despedida #canal** o **b!despedida off**"
-      );
-    }
-
-    d.goodbyeChannel = channel.id;
-    saveData();
-
-    return reply(
-      `♦️🚪 Despedidas configuradas en ${channel}.`
-    );
-  }
-
-  // INVITE CHANNEL
   if (cmd === "invite") {
     if (args[0]?.toLowerCase() === "off") {
       d.inviteChannel = null;
@@ -1577,50 +1515,41 @@ client.on("messageCreate", async message => {
       return reply("🔗 Mensajes de invitaciones desactivados.");
     }
 
-    const channel = mentionedChannel(message);
+    const c = mentionedChannel(message);
 
-    if (!channel?.isTextBased()) {
-      return reply(
-        "❌ Usa **b!invite #canal** o **b!invite off**"
-      );
+    if (!c) {
+      return reply("❌ Usa **b!invite #canal** o **b!invite off**");
     }
 
-    d.inviteChannel = channel.id;
-
+    d.inviteChannel = c.id;
     saveData();
 
-    await cacheInvites(message.guild);
-
     return reply(
-      `♦️🔗 Mensajes de invitaciones configurados en ${channel}.`
+      `🔗 Los mensajes de nuevas invitaciones aparecerán en ${c}.`
     );
   }
 
-  // INVITES
   if (cmd === "invites") {
-    const member =
-      mentionedMember(message) || message.member;
+    const member = mentionedMember(message) || message.member;
 
     const stats = inviteStats(d, member.id);
 
-    const inside =
-      stats.members.filter(id =>
-        message.guild.members.cache.has(id)
-      );
+    const inside = stats.members.filter(id =>
+      message.guild.members.cache.has(id)
+    );
 
-    const list =
-      inside.length
-        ? inside
-            .slice(0, 30)
-            .map((id, index) => `${index + 1}. <@${id}>`)
-            .join("\n")
-        : "Ninguno registrado.";
+    const list = inside.length
+      ? inside
+          .slice(0, 30)
+          .map((id, i) => `${i + 1}. <@${id}>`)
+          .join("\n")
+      : "Ninguno registrado.";
 
     return reply({
       embeds: [
         new EmbedBuilder()
-          .setColor(RED)
-          .setTitle(`♦️🔗 Invitaciones de ${member.user.username}`)
+          .setColor(0xf1c40f)
+          .setTitle(`🔗🃏 Invitaciones de ${member.user.username}`)
           .setThumbnail(member.user.displayAvatarURL())
           .addFields(
             {
@@ -1634,7 +1563,7 @@ client.on("messageCreate", async message => {
               inline: true
             },
             {
-              name: "👥 En servidor",
+              name: "👥 En el servidor",
               value: `${inside.length}`,
               inline: true
             },
@@ -1644,92 +1573,63 @@ client.on("messageCreate", async message => {
             }
           )
           .setFooter({
-            text: "♦️ Fusake • Sistema de invitaciones"
+            text: "Los datos se registran desde que Fusake comenzó a rastrear invites."
           })
           .setTimestamp()
       ]
     });
   }
 
-  // AUTOROL
   if (cmd === "autoroles" || cmd === "setautorole") {
     if (args[0]?.toLowerCase() === "off") {
       d.autoRole = null;
-      saveData();
+    } else {
+      const r = mentionedRole(message);
 
-      return reply("🎭 Autorol desactivado.");
+      if (!r) {
+        return reply("❌ Usa **b!autoroles @rol**");
+      }
+
+      d.autoRole = r.id;
     }
 
-    const role = mentionedRole(message);
-
-    if (!role) {
-      return reply("❌ Usa **b!autoroles @rol**");
-    }
-
-    if (
-      role.position >=
-      message.guild.members.me.roles.highest.position
-    ) {
-      return reply(
-        "❌ Ese rol está por encima del rol de Fusake."
-      );
-    }
-
-    d.autoRole = role.id;
     saveData();
 
-    return reply(`🎭 Autorol configurado: ${role}.`);
+    return reply("🎭 Auto rol actualizado.");
   }
 
   if (cmd === "clearautorole") {
     d.autoRole = null;
     saveData();
 
-    return reply("🎭 Autorol eliminado.");
+    return reply("🃏 Auto rol eliminado correctamente.");
   }
 
-  // LOGS
   if (cmd === "logs" || cmd === "setlog") {
     if (args[0]?.toLowerCase() === "off") {
       d.logsChannel = null;
-      saveData();
+    } else {
+      const c = mentionedChannel(message);
 
-      return reply("♦️📋 Logs desactivados.");
+      if (!c) {
+        return reply("❌ Usa **b!logs #canal**");
+      }
+
+      d.logsChannel = c.id;
     }
 
-    const channel = mentionedChannel(message);
-
-    if (!channel?.isTextBased()) {
-      return reply(
-        "❌ Usa **b!logs #canal** o **b!logs off**"
-      );
-    }
-
-    d.logsChannel = channel.id;
     saveData();
 
-    await reply(`♦️📋 Logs configurados en ${channel}.`);
-
-    await sendLog(
-      message.guild,
-      "SISTEMA DE LOGS ACTIVADO",
-      `👑 **Configurado por:** ${message.author}
-📋 **Canal:** ${channel}
-
-♦️ Los eventos administrativos aparecerán aquí.`
-    );
-
-    return;
+    return reply("📋 Canal de logs actualizado.");
   }
 
   if (cmd === "clearlogs") {
     d.logsChannel = null;
     saveData();
 
-    return reply("📋 Canal de logs eliminado.");
+    return reply("♟️ Canal de logs eliminado.");
   }
 
-  // MAINTENANCE
   if (
     cmd === "maintenance" ||
     cmd === "maintenanceon" ||
@@ -1756,64 +1656,49 @@ client.on("messageCreate", async message => {
     );
   }
 
-  // CONFIG
   if (cmd === "config") {
     return reply({
       embeds: [
         new EmbedBuilder()
-          .setColor(RED)
-          .setTitle("♦️♟️ Configuración de Fusake 🃏")
+          .setColor(0x3498db)
+          .setTitle("♟️🃏 Configuración de Fusake")
           .addFields(
             {
               name: "👋 Bienvenida",
-              value:
-                d.welcomeChannel
-                  ? `<#${d.welcomeChannel}>`
-                  : "Desactivada",
+              value: d.welcomeChannel
+                ? `<#${d.welcomeChannel}>`
+                : "Desactivado",
               inline: true
             },
             {
-              name: "🚪 Despedida",
-              value:
-                d.goodbyeChannel
-                  ? `<#${d.goodbyeChannel}>`
-                  : "Desactivada",
-              inline: true
-            },
-            {
-              name: "🔗 Invitaciones",
-              value:
-                d.inviteChannel
-                  ? `<#${d.inviteChannel}>`
-                  : "Desactivadas",
+              name: "🎭 Auto rol",
+              value: d.autoRole
+                ? `<@&${d.autoRole}>`
+                : "Desactivado",
               inline: true
             },
             {
               name: "📋 Logs",
-              value:
-                d.logsChannel
-                  ? `<#${d.logsChannel}>`
-                  : "Desactivados",
+              value: d.logsChannel
+                ? `<#${d.logsChannel}>`
+                : "Desactivados",
               inline: true
             },
             {
-              name: "🎭 Autorol",
-              value:
-                d.autoRole
-                  ? `<@&${d.autoRole}>`
-                  : "Desactivado",
+              name: "🔗 Invitaciones",
+              value: d.inviteChannel
+                ? `<#${d.inviteChannel}>`
+                : "Desactivadas",
               inline: true
             },
             {
               name: "🔧 Mantenimiento",
-              value:
-                d.maintenance
-                  ? "Activado"
-                  : "Desactivado",
+              value: d.maintenance
+                ? "Activado"
+                : "Desactivado",
               inline: true
             }
           )
-          .setTimestamp()
       ]
     });
   }
@@ -1825,7 +1710,6 @@ client.on("messageCreate", async message => {
     return reply("♻️ Configuración reiniciada.");
   }
 
-  // AUTO RESPUESTAS / REACCIONES
   if (cmd === "autorespuestas" || cmd === "autoreacciones") {
     const key =
       cmd === "autorespuestas"
@@ -1833,6 +1717,7 @@ client.on("messageCreate", async message => {
         : "autoReactions";
 
     const trigger = args.shift()?.toLowerCase();
+
     const value = args.join(" ");
 
     if (!trigger || !value) {
@@ -1860,23 +1745,21 @@ client.on("messageCreate", async message => {
     const trigger = args[0]?.toLowerCase();
 
     if (!trigger) {
-      return reply("❌ Indica una palabra.");
+      return reply("❌ Debes indicar la palabra.");
     }
 
     delete d[key][trigger];
+
     saveData();
 
     return reply("🗑️ Configuración eliminada.");
   }
 
-  // BAN / KICK
   if (cmd === "ban" || cmd === "kick") {
     const member = mentionedMember(message);
 
     if (!member) {
-      return reply(
-        `❌ Usa **b!${cmd} @usuario [razón]**`
-      );
+      return reply(`❌ Usa **b!${cmd} @usuario [razón]**`);
     }
 
     const reason =
@@ -1887,7 +1770,7 @@ client.on("messageCreate", async message => {
       if (cmd === "ban") {
         if (!member.bannable) {
           return reply(
-            "❌ No puedo banear a ese usuario. Revisa la jerarquía."
+            "❌ No puedo banear a ese usuario. Revisa la jerarquía de roles."
           );
         }
 
@@ -1895,7 +1778,7 @@ client.on("messageCreate", async message => {
       } else {
         if (!member.kickable) {
           return reply(
-            "❌ No puedo expulsar a ese usuario."
+            "❌ No puedo expulsar a ese usuario. Revisa la jerarquía de roles."
           );
         }
 
@@ -1907,25 +1790,23 @@ client.on("messageCreate", async message => {
         cmd === "ban"
           ? "USUARIO BANEADO"
           : "USUARIO EXPULSADO",
-        `👤 **Usuario:** ${member.user.tag}
-👑 **Moderador:** ${message.author.tag}
-📝 **Razón:** ${reason}`
+        `**Usuario:** ${member.user.tag}
+**Moderador:** ${message.author.tag}
+**Razón:** ${reason}`,
+        0xe74c3c
       );
 
       return reply(
         `${cmd === "ban" ? "🔨" : "🚪"} **${member.user.tag}**
-📝 **Razón:** ${reason}`
+📝 Razón: **${reason}**`
       );
     } catch (error) {
-      console.error(error);
-
       return reply(
-        "❌ No pude realizar esa acción."
+        `❌ No pude realizar la acción: ${error.message}`
       );
     }
   }
 
-  // UNBAN
   if (cmd === "unban") {
     const id = args[0];
 
@@ -1942,34 +1823,28 @@ client.on("messageCreate", async message => {
       await sendLog(
         message.guild,
         "USUARIO DESBANEADO",
-        `👤 **Usuario:** ${user.tag}
-👑 **Moderador:** ${message.author.tag}`
+        `**Usuario:** ${user.tag}
+**Por:** ${message.author.tag}`,
+        0x2ecc71
       );
 
-      return reply(
-        `🔓 **${user.tag}** fue desbaneado.`
-      );
+      return reply(`🔓♟️ **${user.tag}** fue desbaneado.`);
     } catch {
       return reply(
-        "❌ No pude desbanear ese ID."
+        "❌ No pude desbanear ese ID. Comprueba que esté baneado."
       );
     }
   }
 
-  // SOFTBAN
   if (cmd === "softban") {
     const member = mentionedMember(message);
 
     if (!member) {
-      return reply(
-        "❌ Usa **b!softban @usuario [razón]**"
-      );
+      return reply("❌ Usa **b!softban @usuario [razón]**");
     }
 
     if (!member.bannable) {
-      return reply(
-        "❌ No puedo aplicar softban a ese usuario."
-      );
+      return reply("❌ No puedo aplicar softban a ese usuario.");
     }
 
     const reason =
@@ -1987,20 +1862,19 @@ client.on("messageCreate", async message => {
       await sendLog(
         message.guild,
         "SOFTBAN",
-        `👤 **Usuario:** ${member.user.tag}
-👑 **Moderador:** ${message.author.tag}
-📝 **Razón:** ${reason}`
+        `**Usuario:** ${member.user.tag}
+**Por:** ${message.author.tag}
+**Razón:** ${reason}`
       );
 
       return reply(
-        `♟️ Softban aplicado a **${member.user.tag}**.`
+        `♟️🃏 Softban aplicado a **${member.user.tag}**.`
       );
     } catch {
       return reply("❌ No pude aplicar el softban.");
     }
   }
 
-  // TIMEOUT
   if (cmd === "timeout" || cmd === "untimeout") {
     const member = mentionedMember(message);
 
@@ -2009,9 +1883,7 @@ client.on("messageCreate", async message => {
     }
 
     if (!member.moderatable) {
-      return reply(
-        "❌ No puedo moderar a ese usuario."
-      );
+      return reply("❌ No puedo moderar a ese usuario.");
     }
 
     try {
@@ -2019,13 +1891,6 @@ client.on("messageCreate", async message => {
         await member.timeout(
           null,
           `Retirado por ${message.author.tag}`
-        );
-
-        await sendLog(
-          message.guild,
-          "TIMEOUT RETIRADO",
-          `👤 **Usuario:** ${member.user.tag}
-👑 **Moderador:** ${message.author.tag}`
         );
 
         return reply(
@@ -2052,23 +1917,20 @@ client.on("messageCreate", async message => {
 
       await sendLog(
         message.guild,
-        "TIMEOUT APLICADO",
-        `👤 **Usuario:** ${member.user.tag}
-⏰ **Duración:** ${minutes} minutos
-👑 **Moderador:** ${message.author.tag}`
+        "TIMEOUT",
+        `**Usuario:** ${member.user.tag}
+**Duración:** ${minutes} minutos
+**Por:** ${message.author.tag}`
       );
 
       return reply(
         `⏳ **${member.user.tag}** recibió timeout de **${minutes} minutos**.`
       );
     } catch {
-      return reply(
-        "❌ No pude modificar el timeout."
-      );
+      return reply("❌ No pude modificar el timeout.");
     }
   }
 
-  // WARNINGS
   if (
     cmd === "warn" ||
     cmd === "warnings" ||
@@ -2098,9 +1960,9 @@ client.on("messageCreate", async message => {
       await sendLog(
         message.guild,
         "ADVERTENCIA",
-        `👤 **Usuario:** ${member.user.tag}
-👑 **Moderador:** ${message.author.tag}
-📝 **Razón:** ${reason}`
+        `**Usuario:** ${member.user.tag}
+**Moderador:** ${message.author.tag}
+**Razón:** ${reason}`
       );
 
       return reply(
@@ -2112,13 +1974,6 @@ client.on("messageCreate", async message => {
       delete d.warnings[member.id];
 
       saveData();
-
-      await sendLog(
-        message.guild,
-        "ADVERTENCIAS ELIMINADAS",
-        `👤 **Usuario:** ${member.user.tag}
-👑 **Moderador:** ${message.author.tag}`
-      );
 
       return reply(
         `🧹 Advertencias eliminadas de **${member.user.tag}**.`
@@ -2139,17 +1994,16 @@ client.on("messageCreate", async message => {
     );
   }
 
-  // PURGE
   if (
     cmd === "purge" ||
     cmd === "clear" ||
     cmd === "clearchannel"
   ) {
-    const amount =
+    const n =
       Number(args[0]) ||
       (cmd === "clearchannel" ? 50 : 0);
 
-    if (amount < 1 || amount > 100) {
+    if (n < 1 || n > 100) {
       return reply(
         "❌ Usa una cantidad entre **1 y 100**."
       );
@@ -2157,15 +2011,7 @@ client.on("messageCreate", async message => {
 
     try {
       const deleted =
-        await message.channel.bulkDelete(amount, true);
-
-      await sendLog(
-        message.guild,
-        "MENSAJES ELIMINADOS",
-        `👑 **Moderador:** ${message.author.tag}
-💬 **Canal:** ${message.channel}
-🧹 **Cantidad:** ${deleted.size}`
-      );
+        await message.channel.bulkDelete(n, true);
 
       return message.channel.send(
         `♟️🧹 Se limpiaron **${deleted.size} mensajes**.`
@@ -2175,7 +2021,6 @@ client.on("messageCreate", async message => {
     }
   }
 
-  // LOCK / UNLOCK
   if (cmd === "lock" || cmd === "unlock") {
     try {
       await message.channel.permissionOverwrites.edit(
@@ -2188,41 +2033,29 @@ client.on("messageCreate", async message => {
         }
       );
 
-      await sendLog(
-        message.guild,
-        cmd === "lock"
-          ? "CANAL BLOQUEADO"
-          : "CANAL DESBLOQUEADO",
-        `💬 **Canal:** ${message.channel}
-👑 **Administrador:** ${message.author.tag}`
-      );
-
       return reply(
         cmd === "lock"
-          ? "🔒 Canal bloqueado."
-          : "🔓 Canal desbloqueado."
+          ? "🔒♟️ Canal bloqueado."
+          : "🔓🃏 Canal desbloqueado."
       );
     } catch {
-      return reply(
-        "❌ No pude cambiar los permisos del canal."
-      );
+      return reply("❌ No pude cambiar los permisos del canal.");
     }
   }
 
-  // LOCKALL / UNLOCKALL
   if (cmd === "lockall" || cmd === "unlockall") {
     let changed = 0;
 
-    for (const channel of message.guild.channels.cache.values()) {
+    for (const c of message.guild.channels.cache.values()) {
       if (
-        channel.type !== ChannelType.GuildText &&
-        channel.type !== ChannelType.GuildAnnouncement
+        c.type !== ChannelType.GuildText &&
+        c.type !== ChannelType.GuildAnnouncement
       ) {
         continue;
       }
 
       try {
-        await channel.permissionOverwrites.edit(
+        await c.permissionOverwrites.edit(
           message.guild.roles.everyone,
           {
             SendMessages:
@@ -2236,32 +2069,22 @@ client.on("messageCreate", async message => {
       } catch {}
     }
 
-    await sendLog(
-      message.guild,
-      cmd === "lockall"
-        ? "SERVIDOR BLOQUEADO"
-        : "SERVIDOR DESBLOQUEADO",
-      `👑 **Administrador:** ${message.author.tag}
-💬 **Canales modificados:** ${changed}`
-    );
-
     return reply(
       `${
         cmd === "lockall"
-          ? "🔒"
-          : "🔓"
+          ? "🔒♟️"
+          : "🔓🃏"
       } Se actualizaron **${changed} canales**.`
     );
   }
 
-  // SLOWMODE
   if (cmd === "slowmode") {
-    const seconds = Number(args[0]);
+    const n = Number(args[0]);
 
     if (
-      Number.isNaN(seconds) ||
-      seconds < 0 ||
-      seconds > 21600
+      Number.isNaN(n) ||
+      n < 0 ||
+      n > 21600
     ) {
       return reply(
         "❌ Usa un valor entre **0 y 21600 segundos**."
@@ -2269,21 +2092,19 @@ client.on("messageCreate", async message => {
     }
 
     try {
-      await message.channel.setRateLimitPerUser(seconds);
+      await message.channel.setRateLimitPerUser(n);
 
       return reply(
-        `🐌 Slowmode establecido en **${seconds} segundos**.`
+        `🐌 Slowmode establecido en **${n} segundos**.`
       );
     } catch {
-      return reply(
-        "❌ No pude modificar el slowmode."
-      );
+      return reply("❌ No pude modificar el slowmode.");
     }
   }
 
-  // NICK
   if (cmd === "nick") {
     const member = mentionedMember(message);
+
     const name = args.slice(1).join(" ");
 
     if (!member || !name) {
@@ -2301,17 +2122,12 @@ client.on("messageCreate", async message => {
     try {
       await member.setNickname(name);
 
-      return reply(
-        `✏️ Apodo actualizado a **${name}**.`
-      );
+      return reply(`✏️ Apodo actualizado a **${name}**.`);
     } catch {
-      return reply(
-        "❌ No pude cambiar el apodo."
-      );
+      return reply("❌ No pude cambiar el apodo.");
     }
   }
 
-  // DEHOIST
   if (cmd === "dehoist") {
     let changed = 0;
 
@@ -2325,11 +2141,10 @@ client.on("messageCreate", async message => {
     for (const member of members.values()) {
       if (!member.manageable) continue;
 
-      const newName =
-        member.displayName.replace(
-          /^[^a-zA-Z0-9áéíóúÁÉÍÓÚ]+/,
-          ""
-        );
+      const newName = member.displayName.replace(
+        /^[^a-zA-Z0-9áéíóúÁÉÍÓÚ]+/,
+        ""
+      );
 
       if (!newName) continue;
 
@@ -2344,16 +2159,15 @@ client.on("messageCreate", async message => {
     );
   }
 
-  // ROLEALL
   if (
     cmd === "roleall" ||
     cmd === "removeroleall"
   ) {
-    const role = mentionedRole(message);
+    const r = mentionedRole(message);
 
     if (
-      !role ||
-      role.position >=
+      !r ||
+      r.position >=
         message.guild.members.me.roles.highest.position
     ) {
       return reply(
@@ -2368,28 +2182,27 @@ client.on("messageCreate", async message => {
         if (
           cmd === "roleall" &&
           !member.user.bot &&
-          !member.roles.cache.has(role.id)
+          !member.roles.cache.has(r.id)
         ) {
-          await member.roles.add(role);
+          await member.roles.add(r);
           changed++;
         }
 
         if (
           cmd === "removeroleall" &&
-          member.roles.cache.has(role.id)
+          member.roles.cache.has(r.id)
         ) {
-          await member.roles.remove(role);
+          await member.roles.remove(r);
           changed++;
         }
       } catch {}
     }
 
     return reply(
-      `🎭 Se modificó el rol en **${changed} usuarios**.`
+      `♟️🃏 Se modificó el rol en **${changed} usuarios**.`
     );
   }
 
-  // USER INFO
   if (
     cmd === "checkmember" ||
     cmd === "userinfo"
@@ -2401,8 +2214,8 @@ client.on("messageCreate", async message => {
     return reply({
       embeds: [
         new EmbedBuilder()
-          .setColor(RED)
-          .setTitle(`♦️♟️ ${member.user.tag}`)
+          .setColor(0x3498db)
+          .setTitle(`♟️🃏 ${member.user.tag}`)
           .setThumbnail(member.user.displayAvatarURL())
           .addFields(
             {
@@ -2419,19 +2232,17 @@ client.on("messageCreate", async message => {
             },
             {
               name: "📅 Cuenta creada",
-              value:
-                `<t:${Math.floor(
-                  member.user.createdTimestamp / 1000
-                )}:F>`
+              value: `<t:${Math.floor(
+                member.user.createdTimestamp / 1000
+              )}:F>`
             },
             {
-              name: "🏠 Entró",
-              value:
-                member.joinedTimestamp
-                  ? `<t:${Math.floor(
-                      member.joinedTimestamp / 1000
-                    )}:F>`
-                  : "Desconocido"
+              name: "🏠 Entró al servidor",
+              value: member.joinedTimestamp
+                ? `<t:${Math.floor(
+                    member.joinedTimestamp / 1000
+                  )}:F>`
+                : "Desconocido"
             },
             {
               name: "🎭 Roles",
@@ -2451,16 +2262,15 @@ client.on("messageCreate", async message => {
     });
   }
 
-  // SERVER INFO
   if (cmd === "serverinfo") {
     return reply({
       embeds: [
         new EmbedBuilder()
-          .setColor(RED)
-          .setTitle(`♦️♟️ ${message.guild.name} 🃏`)
+          .setColor(0x3498db)
+          .setTitle(`♟️🃏 ${message.guild.name}`)
           .setThumbnail(message.guild.iconURL())
           .setDescription(
-`👑 Dueño: <@${message.guild.ownerId}>
+            `👑 Dueño: <@${message.guild.ownerId}>
 👥 Miembros: ${message.guild.memberCount}
 💬 Canales: ${message.guild.channels.cache.size}
 🎭 Roles: ${message.guild.roles.cache.size}
@@ -2471,7 +2281,10 @@ client.on("messageCreate", async message => {
     });
   }
 
-  if (cmd === "members" || cmd === "membercount") {
+  if (
+    cmd === "members" ||
+    cmd === "membercount"
+  ) {
     return reply(
       `👥 Miembros: **${message.guild.memberCount}**`
     );
@@ -2516,9 +2329,7 @@ client.on("messageCreate", async message => {
     return reply(
       `📂 Categorías: **${
         message.guild.channels.cache.filter(
-          channel =>
-            channel.type ===
-            ChannelType.GuildCategory
+          c => c.type === ChannelType.GuildCategory
         ).size
       }**`
     );
@@ -2526,18 +2337,16 @@ client.on("messageCreate", async message => {
 
   if (cmd === "channelcount") {
     return reply(
-`♟️ Texto: **${
-  message.guild.channels.cache.filter(
-    channel =>
-      channel.type === ChannelType.GuildText
-  ).size
-}**
+      `♟️ Texto: **${
+        message.guild.channels.cache.filter(
+          c => c.type === ChannelType.GuildText
+        ).size
+      }**
 🃏 Voz: **${
-  message.guild.channels.cache.filter(
-    channel =>
-      channel.type === ChannelType.GuildVoice
-  ).size
-}**`
+        message.guild.channels.cache.filter(
+          c => c.type === ChannelType.GuildVoice
+        ).size
+      }**`
     );
   }
 
@@ -2552,8 +2361,8 @@ client.on("messageCreate", async message => {
     return reply({
       embeds: [
         new EmbedBuilder()
-          .setColor(RED)
-          .setTitle("♦️♟️ Jugadores de la mesa")
+          .setColor(0xf1c40f)
+          .setTitle("♟️🃏 Jugadores de la mesa")
           .setDescription(
             members ||
               "No hay miembros disponibles."
@@ -2562,51 +2371,47 @@ client.on("messageCreate", async message => {
     });
   }
 
-  // ROLES
   if (cmd === "roles") {
     const roles =
       message.guild.roles.cache
-        .filter(role => role.id !== message.guild.id)
+        .filter(
+          role =>
+            role.id !== message.guild.id
+        )
         .map(role => role.toString())
         .slice(0, 50)
         .join("\n");
 
-    return reply(
-      roles || "No hay roles."
-    );
+    return reply(roles || "No hay roles.");
   }
 
   if (cmd === "roleinfo") {
-    const role = mentionedRole(message);
+    const r = mentionedRole(message);
 
-    if (!role) {
-      return reply(
-        "❌ Usa **b!roleinfo @rol**"
-      );
+    if (!r) {
+      return reply("❌ Usa **b!roleinfo @rol**");
     }
 
     return reply(
-`🃏 **${role.name}**
-🆔 ${role.id}
-👥 ${role.members.size} miembros
-📌 Posición ${role.position}`
+      `🃏 **${r.name}**
+🆔 ${r.id}
+👥 ${r.members.size} miembros
+📌 Posición ${r.position}`
     );
   }
 
-  // CHANNEL INFO
   if (cmd === "channelinfo") {
-    const channel =
+    const c =
       mentionedChannel(message) ||
       message.channel;
 
     return reply(
-`💬 **${channel.name}**
-🆔 ${channel.id}
-📂 Tipo: ${channel.type}`
+      `💬 **${c.name}**
+🆔 ${c.id}
+📂 Tipo: ${c.type}`
     );
   }
 
-  // ICON / BANNER
   if (
     cmd === "servericon" ||
     cmd === "serverbanner"
@@ -2627,18 +2432,17 @@ client.on("messageCreate", async message => {
     return reply({
       embeds: [
         new EmbedBuilder()
-          .setColor(RED)
+          .setColor(0xf1c40f)
           .setTitle(
             cmd === "servericon"
-              ? "♦️ Icono del servidor"
-              : "♦️ Banner del servidor"
+              ? "♟️ Icono del servidor"
+              : "🃏 Banner del servidor"
           )
           .setImage(url)
       ]
     });
   }
 
-  // STAFF
   if (cmd === "staff") {
     const staff =
       message.guild.members.cache
@@ -2657,25 +2461,20 @@ client.on("messageCreate", async message => {
     );
   }
 
-  // PERMISSIONS
   if (cmd === "permissions") {
     const member =
       mentionedMember(message) ||
       message.member;
 
-    const permissions =
-      member.permissions
-        .toArray()
-        .map(permission => `• ${permission}`)
-        .join("\n")
-        .slice(0, 1900);
+    const perms = member.permissions
+      .toArray()
+      .map(p => `• ${p}`)
+      .join("\n")
+      .slice(0, 1900);
 
-    return reply(
-      permissions || "Sin permisos."
-    );
+    return reply(perms || "Sin permisos.");
   }
 
-  // AVATAR
   if (cmd === "avatar") {
     const member =
       mentionedMember(message) ||
@@ -2684,10 +2483,8 @@ client.on("messageCreate", async message => {
     return reply({
       embeds: [
         new EmbedBuilder()
-          .setColor(RED)
-          .setTitle(
-            `♦️ Avatar de ${member.user.tag}`
-          )
+          .setColor(0xf1c40f)
+          .setTitle(`🃏 Avatar de ${member.user.tag}`)
           .setImage(
             member.user.displayAvatarURL({
               size: 1024
@@ -2705,14 +2502,11 @@ client.on("messageCreate", async message => {
     );
   }
 
-  // SAY
   if (cmd === "say") {
     const text = args.join(" ");
 
     if (!text) {
-      return reply(
-        "❌ Usa **b!say mensaje**"
-      );
+      return reply("❌ Usa **b!say mensaje**");
     }
 
     await message.delete().catch(() => {});
@@ -2725,31 +2519,29 @@ client.on("messageCreate", async message => {
     });
   }
 
-  // ANNOUNCE
   if (cmd === "announce") {
     const text = args.join(" ");
 
     if (!text) {
-      return reply(
-        "❌ Usa **b!announce mensaje**"
-      );
+      return reply("❌ Usa **b!announce mensaje**");
     }
 
     return message.channel.send({
       embeds: [
         new EmbedBuilder()
-          .setColor(RED)
-          .setTitle("♦️♟️ ANUNCIO 🃏")
+          .setColor(0xf1c40f)
+          .setTitle("♟️🃏 ANUNCIO")
           .setDescription(text)
           .setTimestamp()
       ]
     });
   }
 
-  // EMBED
   if (cmd === "embed") {
     const colorInput = args.shift();
+
     const color = parseColor(colorInput);
+
     const text = args.join(" ");
 
     if (color === null || !text) {
@@ -2767,22 +2559,19 @@ client.on("messageCreate", async message => {
     });
   }
 
-  // POLL
   if (cmd === "poll") {
     const question = args.join(" ");
 
     if (!question) {
-      return reply(
-        "❌ Usa **b!poll pregunta**"
-      );
+      return reply("❌ Usa **b!poll pregunta**");
     }
 
     const poll =
       await message.channel.send({
         embeds: [
           new EmbedBuilder()
-            .setColor(RED)
-            .setTitle("♦️♟️ Encuesta 🃏")
+            .setColor(0xf1c40f)
+            .setTitle("♟️🃏 Encuesta")
             .setDescription(question)
             .setFooter({
               text: "👍 Sí • 👎 No"
@@ -2796,33 +2585,32 @@ client.on("messageCreate", async message => {
     return;
   }
 
-  // MOVE / DISCONNECT
-  if (cmd === "move" || cmd === "disconnect") {
-    const member = mentionedMember(message);
+  if (
+    cmd === "move" ||
+    cmd === "disconnect"
+  ) {
+    const member =
+      mentionedMember(message);
 
     if (!member) {
-      return reply(
-        "❌ Debes mencionar un usuario."
-      );
+      return reply("❌ Debes mencionar un usuario.");
     }
 
     try {
       if (cmd === "move") {
-        const channel = mentionedChannel(message);
+        const c = mentionedChannel(message);
 
         if (
-          !channel ||
-          channel.type !== ChannelType.GuildVoice
+          !c ||
+          c.type !== ChannelType.GuildVoice
         ) {
-          return reply(
-            "❌ Menciona un canal de voz."
-          );
+          return reply("❌ Menciona un canal de voz.");
         }
 
-        await member.voice.setChannel(channel);
+        await member.voice.setChannel(c);
 
         return reply(
-          `🔊 **${member.user.tag}** fue movido a ${channel}.`
+          `🔊 **${member.user.tag}** fue movido a ${c}.`
         );
       }
 
@@ -2833,12 +2621,11 @@ client.on("messageCreate", async message => {
       );
     } catch {
       return reply(
-        "❌ No pude modificar el canal de voz."
+        "❌ No pude modificar el canal de voz del usuario."
       );
     }
   }
 
-  // ROLES
   if (
     cmd === "addrole" ||
     cmd === "removerole" ||
@@ -2856,11 +2643,11 @@ client.on("messageCreate", async message => {
     }
 
     const member = mentionedMember(message);
-    const role = mentionedRole(message);
+    const r = mentionedRole(message);
 
     if (
       !member ||
-      !role ||
+      !r ||
       !["add", "remove"].includes(action)
     ) {
       return reply(
@@ -2869,7 +2656,7 @@ client.on("messageCreate", async message => {
     }
 
     if (
-      role.position >=
+      r.position >=
       message.guild.members.me.roles.highest.position
     ) {
       return reply(
@@ -2879,46 +2666,28 @@ client.on("messageCreate", async message => {
 
     try {
       if (action === "add") {
-        await member.roles.add(role);
+        await member.roles.add(r);
       } else {
-        await member.roles.remove(role);
+        await member.roles.remove(r);
       }
 
-      await sendLog(
-        message.guild,
-        "ROL MODIFICADO",
-        `👤 **Usuario:** ${member.user.tag}
-🎭 **Rol:** ${role.name}
-⚙️ **Acción:** ${
-          action === "add"
-            ? "Añadido"
-            : "Eliminado"
-        }
-👑 **Administrador:** ${message.author.tag}`
-      );
-
       return reply(
-        `🎭 Rol ${role} ${
+        `🎭 Rol ${r} ${
           action === "add"
             ? "añadido a"
             : "eliminado de"
         } **${member.user.tag}**.`
       );
     } catch {
-      return reply(
-        "❌ No pude modificar ese rol."
-      );
+      return reply("❌ No pude modificar ese rol.");
     }
   }
 
-  // STATUS
   if (cmd === "setstatus") {
     const text = args.join(" ");
 
     if (!text) {
-      return reply(
-        "❌ Usa **b!setstatus texto**"
-      );
+      return reply("❌ Usa **b!setstatus texto**");
     }
 
     client.user.setPresence({
@@ -2936,10 +2705,10 @@ client.on("messageCreate", async message => {
     );
   }
 
-  // RENAME
   if (cmd === "renamechannel") {
-    const name =
-      args.join("-").toLowerCase();
+    const name = args
+      .join("-")
+      .toLowerCase();
 
     if (!name) {
       return reply(
@@ -2954,15 +2723,13 @@ client.on("messageCreate", async message => {
         `🃏 Canal renombrado a **${name}**.`
       );
     } catch {
-      return reply(
-        "❌ No pude renombrar el canal."
-      );
+      return reply("❌ No pude renombrar el canal.");
     }
   }
 
-  // DM
   if (cmd === "dm") {
     const member = mentionedMember(message);
+
     const text = args.slice(1).join(" ");
 
     if (!member || !text) {
@@ -2981,31 +2748,24 @@ client.on("messageCreate", async message => {
 
       return reply("💌 Mensaje enviado.");
     } catch {
-      return reply(
-        "❌ No pude enviar el MD."
-      );
+      return reply("❌ No pude enviar el MD.");
     }
   }
 
-  // REACT
   if (cmd === "react") {
     if (!args[0]) {
-      return reply(
-        "❌ Usa **b!react emoji**"
-      );
+      return reply("❌ Usa **b!react emoji**");
     }
 
     try {
       await message.react(args[0]);
+
       return;
     } catch {
-      return reply(
-        "❌ No pude añadir esa reacción."
-      );
+      return reply("❌ No pude añadir esa reacción.");
     }
   }
 
-  // CLEARLAST
   if (cmd === "clearlast") {
     const messages =
       await message.channel.messages
@@ -3015,14 +2775,12 @@ client.on("messageCreate", async message => {
         .catch(() => null);
 
     if (!messages) {
-      return reply(
-        "❌ No pude obtener los mensajes."
-      );
+      return reply("❌ No pude obtener los mensajes.");
     }
 
     const botMessages =
       messages.filter(
-        msg => msg.author.id === client.user.id
+        m => m.author.id === client.user.id
       );
 
     let deleted = 0;
@@ -3039,11 +2797,25 @@ client.on("messageCreate", async message => {
     );
   }
 
-  // SORTEO
+  // ====================================================
+  // SORTEO + REQUISITOS
+  // ====================================================
+
   if (cmd === "sorteo") {
-    const timeText = args.shift();
-    const winners = Number(args.shift());
-    const prize = args.join(" ");
+    const fullText = args.join(" ");
+
+    const sections = fullText.split("|");
+
+    const main = sections[0]
+      .trim()
+      .split(/\s+/);
+
+    const requirementsText =
+      sections.slice(1).join("|").trim();
+
+    const timeText = main.shift();
+    const winners = Number(main.shift());
+    const prize = main.join(" ");
 
     const time = parseDuration(timeText);
 
@@ -3055,7 +2827,7 @@ client.on("messageCreate", async message => {
       !prize
     ) {
       return reply(
-        "❌ Usa **b!sorteo 1h30m 2 Premio**"
+        "❌ Usa **b!sorteo 1h30m 2 Premio**\nCon requisitos: **b!sorteo 1h30m 2 Premio | 5 invites, 1000 mensajes**"
       );
     }
 
@@ -3067,28 +2839,15 @@ client.on("messageCreate", async message => {
           message.author.id,
           time,
           winners,
-          prize
+          prize,
+          requirementsText
         );
 
-      await sendLog(
-        message.guild,
-        "SORTEO CREADO",
-        `🏆 **Premio:** ${prize}
-👑 **Ganadores:** ${winners}
-⏰ **Duración:** ${timeText}
-👤 **Creado por:** ${message.author.tag}
-🆔 **ID:** ${giveaway.id}`
-      );
-
       return reply(
-        `🎉 Sorteo creado.\n🆔 ID: \`${giveaway.id}\``
+        `🎉 Sorteo creado correctamente.\n🆔 ID: \`${giveaway.id}\``
       );
-    } catch (error) {
-      console.error(error);
-
-      return reply(
-        "❌ No pude crear el sorteo."
-      );
+    } catch {
+      return reply("❌ No pude crear el sorteo.");
     }
   }
 
@@ -3096,9 +2855,7 @@ client.on("messageCreate", async message => {
     const id = args[0];
 
     if (!id) {
-      return reply(
-        "❌ Usa **b!sorteoend ID**"
-      );
+      return reply("❌ Usa **b!sorteoend ID**");
     }
 
     const result =
@@ -3118,9 +2875,7 @@ client.on("messageCreate", async message => {
     const id = args[0];
 
     if (!id) {
-      return reply(
-        "❌ Usa **b!sorteoreroll ID**"
-      );
+      return reply("❌ Usa **b!sorteoreroll ID**");
     }
 
     const result =
@@ -3137,55 +2892,40 @@ client.on("messageCreate", async message => {
     );
   }
 
-  // BOT AVATAR
   if (cmd === "botavatar") {
     if (!args[0]) {
-      return reply(
-        "❌ Usa **b!botavatar URL**"
-      );
+      return reply("❌ Usa **b!botavatar URL**");
     }
 
     try {
       await client.user.setAvatar(args[0]);
 
       return reply(
-        "♦️ Avatar de Fusake actualizado."
+        "♟️🃏 Avatar de Fusake actualizado."
       );
     } catch {
-      return reply(
-        "❌ No pude cambiar el avatar."
-      );
+      return reply("❌ No pude cambiar el avatar.");
     }
   }
 
-  // BOT NAME
   if (cmd === "botname") {
     const name = args.join(" ");
 
     if (!name) {
-      return reply(
-        "❌ Usa **b!botname nombre**"
-      );
+      return reply("❌ Usa **b!botname nombre**");
     }
 
     try {
       await client.user.setUsername(name);
 
-      return reply(
-        "🃏 Nombre del bot cambiado."
-      );
+      return reply("🃏 Nombre del bot cambiado.");
     } catch {
-      return reply(
-        "❌ No pude cambiar el nombre."
-      );
+      return reply("❌ No pude cambiar el nombre.");
     }
   }
 
-  // RESTART
   if (cmd === "restart") {
-    await reply(
-      "♟️ Fusake se está reiniciando..."
-    );
+    await reply("♟️ Fusake se está reiniciando...");
 
     setTimeout(
       () => process.exit(0),
@@ -3195,7 +2935,6 @@ client.on("messageCreate", async message => {
     return;
   }
 
-  // SERVERLIST
   if (cmd === "serverlist") {
     const list =
       client.guilds.cache
@@ -3206,34 +2945,34 @@ client.on("messageCreate", async message => {
         .join("\n")
         .slice(0, 1900);
 
-    return reply(
-      list || "Sin servidores."
-    );
+    return reply(list || "Sin servidores.");
   }
 
-  // MEMORY
   if (cmd === "memory") {
     const memory = process.memoryUsage();
 
     return reply(
-`🧠 RAM utilizada: **${Math.round(
-  memory.heapUsed / 1024 / 1024
-)} MB**
+      `🧠 RAM utilizada: **${Math.round(
+        memory.heapUsed /
+          1024 /
+          1024
+      )} MB**
 📦 Heap total: **${Math.round(
-  memory.heapTotal / 1024 / 1024
-)} MB**`
+        memory.heapTotal /
+          1024 /
+          1024
+      )} MB**`
     );
   }
 
-  // BOT INFO
   if (cmd === "botinfo") {
     return reply(
-`♦️♟️ **${client.user.tag}** 🃏
+      `♟️🃏 **${client.user.tag}**
 
 🌐 Servidores: ${client.guilds.cache.size}
 📡 Ping: ${client.ws.ping}ms
 ⚡ Prefijo: ${PREFIX}
-🤖 Slash: /`
+🤖 Slash commands: /`
     );
   }
 
@@ -3252,7 +2991,7 @@ client.on("messageCreate", async message => {
   }
 
   return reply(
-    `❓ Comando desconocido. Usa **${PREFIX}help**.`
+    `❓ Comando desconocido. Usa **${PREFIX}help** para ver el menú.`
   );
 });
 
@@ -3263,15 +3002,19 @@ client.on("messageCreate", async message => {
 client.on("interactionCreate", async interaction => {
   if (!interaction.guild) return;
 
+  // ====================================================
   // HELP MENU
+  // ====================================================
+
   if (
     interaction.isStringSelectMenu() &&
     interaction.customId === "fusake_help"
   ) {
-    if (!(await adminOnlyInteraction(interaction))) return;
+    if (!(await adminOnlyInteraction(interaction))) {
+      return;
+    }
 
-    const selected =
-      help[interaction.values[0]];
+    const selected = help[interaction.values[0]];
 
     if (!selected) {
       return interaction.reply({
@@ -3283,7 +3026,7 @@ client.on("interactionCreate", async interaction => {
     return interaction.reply({
       embeds: [
         new EmbedBuilder()
-          .setColor(RED)
+          .setColor(0xf1c40f)
           .setTitle(selected[0])
           .setDescription(
             selected
@@ -3296,7 +3039,7 @@ client.on("interactionCreate", async interaction => {
               .join("\n")
           )
           .setFooter({
-            text: "♦️♟️ Fusake • Solo administradores 🃏"
+            text: "♟️🃏 Fusake • Solo administradores"
           })
           .setTimestamp()
       ],
@@ -3304,10 +3047,233 @@ client.on("interactionCreate", async interaction => {
     });
   }
 
-  // BOTONES DE SORTEO
+  // ====================================================
+  // NUEVO: MENÚ DE ROLES
+  // ====================================================
+
+  if (
+    interaction.isStringSelectMenu() &&
+    interaction.customId.startsWith("reacrol_menu:")
+  ) {
+    const messageId =
+      interaction.customId.split(":")[1];
+
+    const d = getGuildData(interaction.guild.id);
+
+    const panel =
+      getReactionRolePanel(d, messageId);
+
+    if (!panel || panel.type !== "MENU") {
+      return interaction.reply({
+        content:
+          "❌ Este menú de roles ya no está configurado.",
+        ephemeral: true
+      });
+    }
+
+    const selectedRoleId =
+      interaction.values[0];
+
+    const selectedOption =
+      panel.options.find(
+        option =>
+          option.roleId === selectedRoleId
+      );
+
+    if (!selectedOption) {
+      return interaction.reply({
+        content: "❌ Rol no encontrado.",
+        ephemeral: true
+      });
+    }
+
+    const member =
+      await interaction.guild.members
+        .fetch(interaction.user.id)
+        .catch(() => null);
+
+    if (!member) {
+      return interaction.reply({
+        content: "❌ No pude encontrar tu usuario.",
+        ephemeral: true
+      });
+    }
+
+    const role =
+      interaction.guild.roles.cache.get(
+        selectedRoleId
+      );
+
+    if (!role) {
+      return interaction.reply({
+        content:
+          "❌ Ese rol ya no existe.",
+        ephemeral: true
+      });
+    }
+
+    if (!role.editable) {
+      return interaction.reply({
+        content:
+          "❌ Fusake no puede administrar ese rol. Coloca el rol de Fusake por encima.",
+        ephemeral: true
+      });
+    }
+
+    try {
+      // QUITAR TODOS LOS DEMÁS ROLES DE ESTE MISMO MENÚ
+      for (const option of panel.options) {
+        if (
+          option.roleId !== selectedRoleId &&
+          member.roles.cache.has(option.roleId)
+        ) {
+          const oldRole =
+            interaction.guild.roles.cache.get(
+              option.roleId
+            );
+
+          if (oldRole?.editable) {
+            await member.roles.remove(oldRole);
+          }
+        }
+      }
+
+      // AGREGAR EL NUEVO
+      if (!member.roles.cache.has(selectedRoleId)) {
+        await member.roles.add(role);
+      }
+
+      return interaction.reply({
+        content:
+          `✅ Ahora tenés el rol ${role}.\n♟️ Si tenías otro rol de este menú, fue retirado automáticamente.`,
+        ephemeral: true
+      });
+    } catch (error) {
+      return interaction.reply({
+        content:
+          `❌ No pude modificar tus roles: ${error.message}`,
+        ephemeral: true
+      });
+    }
+  }
+
+  // ====================================================
+  // BOTONES
+  // ====================================================
+
   if (interaction.isButton()) {
+
+    // ==================================================
+    // NUEVO: BOTONES DE ROLES
+    // ==================================================
+
     if (
-      interaction.customId.startsWith("giveaway_join:")
+      interaction.customId.startsWith(
+        "reacrol_button:"
+      )
+    ) {
+      const parts =
+        interaction.customId.split(":");
+
+      const messageId = parts[1];
+      const roleId = parts[2];
+
+      const d =
+        getGuildData(interaction.guild.id);
+
+      const panel =
+        getReactionRolePanel(d, messageId);
+
+      if (!panel || panel.type !== "BOTON") {
+        return interaction.reply({
+          content:
+            "❌ Este botón de rol ya no está configurado.",
+          ephemeral: true
+        });
+      }
+
+      const option =
+        panel.options.find(
+          item => item.roleId === roleId
+        );
+
+      if (!option) {
+        return interaction.reply({
+          content:
+            "❌ Esta opción ya no existe.",
+          ephemeral: true
+        });
+      }
+
+      const member =
+        await interaction.guild.members
+          .fetch(interaction.user.id)
+          .catch(() => null);
+
+      if (!member) {
+        return interaction.reply({
+          content:
+            "❌ No pude encontrar tu usuario.",
+          ephemeral: true
+        });
+      }
+
+      const role =
+        interaction.guild.roles.cache.get(
+          roleId
+        );
+
+      if (!role) {
+        return interaction.reply({
+          content:
+            "❌ Ese rol ya no existe.",
+          ephemeral: true
+        });
+      }
+
+      if (!role.editable) {
+        return interaction.reply({
+          content:
+            "❌ Fusake no puede administrar ese rol. Coloca el rol de Fusake por encima.",
+          ephemeral: true
+        });
+      }
+
+      try {
+        if (member.roles.cache.has(roleId)) {
+          await member.roles.remove(role);
+
+          return interaction.reply({
+            content:
+              `➖ Te quité el rol ${role}.`,
+            ephemeral: true
+          });
+        }
+
+        await member.roles.add(role);
+
+        return interaction.reply({
+          content:
+            `➕ Te agregué el rol ${role}.`,
+          ephemeral: true
+        });
+      } catch (error) {
+        return interaction.reply({
+          content:
+            `❌ No pude modificar el rol: ${error.message}`,
+          ephemeral: true
+        });
+      }
+    }
+
+    // ==================================================
+    // SORTEO PARTICIPAR + REQUISITOS
+    // ==================================================
+
+    if (
+      interaction.customId.startsWith(
+        "giveaway_join:"
+      )
     ) {
       const id =
         interaction.customId.split(":")[1];
@@ -3320,18 +3286,21 @@ client.on("interactionCreate", async interaction => {
 
       if (!giveaway) {
         return interaction.reply({
-          content: "❌ Este sorteo ya no existe.",
+          content:
+            "❌ Este sorteo ya no existe.",
           ephemeral: true
         });
       }
 
       if (giveaway.ended) {
         return interaction.reply({
-          content: "❌ Este sorteo ya terminó.",
+          content:
+            "❌ Este sorteo ya terminó.",
           ephemeral: true
         });
       }
 
+      // SI YA ESTÁ PARTICIPANDO, PUEDE SALIR SIN COMPROBAR REQUISITOS
       if (
         giveaway.participants.includes(
           interaction.user.id
@@ -3339,21 +3308,61 @@ client.on("interactionCreate", async interaction => {
       ) {
         giveaway.participants =
           giveaway.participants.filter(
-            userId =>
-              userId !== interaction.user.id
+            id =>
+              id !== interaction.user.id
           );
 
         saveData();
 
         try {
           await interaction.message.edit({
-            embeds: [giveawayEmbed(giveaway)],
-            components: [giveawayButtons(giveaway.id)]
+            embeds: [
+              giveawayEmbed(giveaway)
+            ],
+            components: [
+              giveawayButtons(
+                giveaway.id
+              )
+            ]
           });
         } catch {}
 
         return interaction.reply({
-          content: "🚪 Saliste del sorteo.",
+          content:
+            "🚪 Saliste del sorteo.",
+          ephemeral: true
+        });
+      }
+
+      // COMPROBAR REQUISITOS
+      const requirementCheck =
+        checkGiveawayRequirements(
+          interaction.guild,
+          interaction.user.id,
+          giveaway
+        );
+
+      if (!requirementCheck.ok) {
+        return interaction.reply({
+          embeds: [
+            new EmbedBuilder()
+              .setColor(0xe74c3c)
+              .setTitle(
+                "❌ NO CUMPLES LOS REQUISITOS"
+              )
+              .setDescription(
+                `No podés participar todavía en este sorteo.
+
+${requirementCheck.failed.join("\n")}
+
+📋 **Requisitos del sorteo**
+${requirementText(giveaway)}`
+              )
+              .setFooter({
+                text:
+                  "♟️ Cumple los requisitos e inténtalo nuevamente 🃏"
+              })
+          ],
           ephemeral: true
         });
       }
@@ -3366,8 +3375,14 @@ client.on("interactionCreate", async interaction => {
 
       try {
         await interaction.message.edit({
-          embeds: [giveawayEmbed(giveaway)],
-          components: [giveawayButtons(giveaway.id)]
+          embeds: [
+            giveawayEmbed(giveaway)
+          ],
+          components: [
+            giveawayButtons(
+              giveaway.id
+            )
+          ]
         });
       } catch {}
 
@@ -3379,7 +3394,9 @@ client.on("interactionCreate", async interaction => {
     }
 
     if (
-      interaction.customId.startsWith("giveaway_users:")
+      interaction.customId.startsWith(
+        "giveaway_users:"
+      )
     ) {
       const id =
         interaction.customId.split(":")[1];
@@ -3392,7 +3409,8 @@ client.on("interactionCreate", async interaction => {
 
       if (!giveaway) {
         return interaction.reply({
-          content: "❌ Sorteo no encontrado.",
+          content:
+            "❌ Sorteo no encontrado.",
           ephemeral: true
         });
       }
@@ -3411,8 +3429,10 @@ client.on("interactionCreate", async interaction => {
       return interaction.reply({
         embeds: [
           new EmbedBuilder()
-            .setColor(RED)
-            .setTitle("♦️👥 Participantes")
+            .setColor(0x3498db)
+            .setTitle(
+              "👥 Participantes del sorteo"
+            )
             .setDescription(users)
             .setFooter({
               text:
@@ -3424,16 +3444,26 @@ client.on("interactionCreate", async interaction => {
     }
   }
 
-  if (!interaction.isChatInputCommand()) return;
+  // ====================================================
+  // SLASH COMMANDS
+  // ====================================================
 
-  if (!(await adminOnlyInteraction(interaction))) return;
+  if (!interaction.isChatInputCommand()) {
+    return;
+  }
+
+  if (
+    !(await adminOnlyInteraction(interaction))
+  ) {
+    return;
+  }
 
   const d =
     getGuildData(interaction.guild.id);
 
-  const cmd = interaction.commandName;
+  const cmd =
+    interaction.commandName;
 
-  // HELP
   if (cmd === "help") {
     return interaction.reply({
       embeds: [helpEmbed()],
@@ -3444,7 +3474,8 @@ client.on("interactionCreate", async interaction => {
 
   if (cmd === "ping") {
     return interaction.reply({
-      content: `🏓 Pong! **${client.ws.ping}ms**`,
+      content:
+        `🏓 Pong! **${client.ws.ping}ms**`,
       ephemeral: true
     });
   }
@@ -3462,17 +3493,16 @@ client.on("interactionCreate", async interaction => {
   if (cmd === "botinfo") {
     return interaction.reply({
       content:
-`♦️♟️ **${client.user.tag}** 🃏
+        `♟️🃏 **${client.user.tag}**
 
 🌐 Servidores: ${client.guilds.cache.size}
 📡 Ping: ${client.ws.ping}ms
 ⚡ Prefijo: ${PREFIX}
-🤖 Slash: /`,
+🤖 Slash commands: /`,
       ephemeral: true
     });
   }
 
-  // EMBED
   if (cmd === "embed") {
     const colorText =
       interaction.options.getString(
@@ -3506,25 +3536,30 @@ client.on("interactionCreate", async interaction => {
     });
 
     return interaction.reply({
-      content: "✅ Embed enviado.",
+      content:
+        "✅ Embed enviado.",
       ephemeral: true
     });
   }
 
-  // BIENVENIDA
   if (cmd === "bienvenida") {
     const disable =
-      interaction.options.getBoolean("desactivar");
+      interaction.options.getBoolean(
+        "desactivar"
+      );
 
     const channel =
-      interaction.options.getChannel("canal");
+      interaction.options.getChannel(
+        "canal"
+      );
 
     if (disable) {
       d.welcomeChannel = null;
       saveData();
 
       return interaction.reply({
-        content: "♦️ Bienvenidas desactivadas.",
+        content:
+          "♟️ Bienvenidas desactivadas.",
         ephemeral: true
       });
     }
@@ -3532,153 +3567,126 @@ client.on("interactionCreate", async interaction => {
     if (!channel) {
       return interaction.reply({
         content:
-          "❌ Selecciona un canal o activa `desactivar`.",
+          "❌ Selecciona un canal o usa `desactivar`.",
         ephemeral: true
       });
     }
 
     d.welcomeChannel = channel.id;
+
     saveData();
 
     return interaction.reply({
       content:
-        `♦️👋 Bienvenidas configuradas en ${channel}.`,
+        `👋 Bienvenidas configuradas en ${channel}.`,
       ephemeral: true
     });
   }
 
-  // DESPEDIDA
-  if (cmd === "despedida") {
-    const disable =
-      interaction.options.getBoolean("desactivar");
-
-    const channel =
-      interaction.options.getChannel("canal");
-
-    if (disable) {
-      d.goodbyeChannel = null;
-      saveData();
-
-      return interaction.reply({
-        content: "♦️ Despedidas desactivadas.",
-        ephemeral: true
-      });
-    }
-
-    if (!channel) {
-      return interaction.reply({
-        content:
-          "❌ Selecciona un canal o activa `desactivar`.",
-        ephemeral: true
-      });
-    }
-
-    d.goodbyeChannel = channel.id;
-    saveData();
-
-    return interaction.reply({
-      content:
-        `♦️🚪 Despedidas configuradas en ${channel}.`,
-      ephemeral: true
-    });
-  }
-
-  // LOGS
   if (cmd === "logs") {
     const disable =
-      interaction.options.getBoolean("desactivar");
+      interaction.options.getBoolean(
+        "desactivar"
+      );
 
     const channel =
-      interaction.options.getChannel("canal");
+      interaction.options.getChannel(
+        "canal"
+      );
 
     if (disable) {
       d.logsChannel = null;
       saveData();
 
       return interaction.reply({
-        content: "📋 Logs desactivados.",
+        content:
+          "📋 Logs desactivados.",
         ephemeral: true
       });
     }
 
     if (!channel) {
       return interaction.reply({
-        content: "❌ Selecciona un canal.",
+        content:
+          "❌ Selecciona un canal.",
         ephemeral: true
       });
     }
 
     d.logsChannel = channel.id;
+
     saveData();
 
-    await interaction.reply({
+    return interaction.reply({
       content:
-        `♦️📋 Logs configurados en ${channel}.`,
+        `📋 Logs configurados en ${channel}.`,
       ephemeral: true
     });
-
-    await sendLog(
-      interaction.guild,
-      "SISTEMA DE LOGS ACTIVADO",
-      `👑 **Administrador:** ${interaction.user}
-📋 **Canal:** ${channel}`
-    );
-
-    return;
   }
 
-  // AUTOROLE
   if (cmd === "autorole") {
     const disable =
-      interaction.options.getBoolean("desactivar");
+      interaction.options.getBoolean(
+        "desactivar"
+      );
 
     const role =
-      interaction.options.getRole("rol");
+      interaction.options.getRole(
+        "rol"
+      );
 
     if (disable) {
       d.autoRole = null;
       saveData();
 
       return interaction.reply({
-        content: "🎭 Autorol desactivado.",
+        content:
+          "🎭 Autorol desactivado.",
         ephemeral: true
       });
     }
 
     if (!role) {
       return interaction.reply({
-        content: "❌ Selecciona un rol.",
+        content:
+          "❌ Selecciona un rol.",
         ephemeral: true
       });
     }
 
     if (
       role.position >=
-      interaction.guild.members.me.roles.highest.position
+      interaction.guild.members.me
+        .roles.highest.position
     ) {
       return interaction.reply({
         content:
-          "❌ Ese rol está por encima de Fusake.",
+          "❌ Ese rol está por encima del rol de Fusake.",
         ephemeral: true
       });
     }
 
     d.autoRole = role.id;
+
     saveData();
 
     return interaction.reply({
-      content: `🎭 Autorol configurado: ${role}.`,
+      content:
+        `🎭 Autorol configurado: ${role}.`,
       ephemeral: true
     });
   }
 
-  // INVITE
   if (cmd === "invite") {
     const disable =
-      interaction.options.getBoolean("desactivar");
+      interaction.options.getBoolean(
+        "desactivar"
+      );
 
     const channel =
-      interaction.options.getChannel("canal");
+      interaction.options.getChannel(
+        "canal"
+      );
 
     if (disable) {
       d.inviteChannel = null;
@@ -3693,35 +3701,41 @@ client.on("interactionCreate", async interaction => {
 
     if (!channel) {
       return interaction.reply({
-        content: "❌ Selecciona un canal.",
+        content:
+          "❌ Selecciona un canal.",
         ephemeral: true
       });
     }
 
     d.inviteChannel = channel.id;
-    saveData();
 
-    await cacheInvites(interaction.guild);
+    saveData();
 
     return interaction.reply({
       content:
-        `♦️🔗 Invitaciones configuradas en ${channel}.`,
+        `🔗 Las nuevas invitaciones aparecerán en ${channel}.`,
       ephemeral: true
     });
   }
 
-  // INVITES STATS
   if (cmd === "invites") {
     const user =
-      interaction.options.getUser("usuario") ||
+      interaction.options.getUser(
+        "usuario"
+      ) ||
       interaction.user;
 
     const stats =
-      inviteStats(d, user.id);
+      inviteStats(
+        d,
+        user.id
+      );
 
     const inside =
       stats.members.filter(id =>
-        interaction.guild.members.cache.has(id)
+        interaction.guild.members.cache.has(
+          id
+        )
       );
 
     const list =
@@ -3738,38 +3752,211 @@ client.on("interactionCreate", async interaction => {
     return interaction.reply({
       embeds: [
         new EmbedBuilder()
-          .setColor(RED)
+          .setColor(0xf1c40f)
           .setTitle(
-            `♦️🔗 Invitaciones de ${user.username}`
+            `🔗🃏 Invitaciones de ${user.username}`
           )
-          .setThumbnail(user.displayAvatarURL())
+          .setThumbnail(
+            user.displayAvatarURL()
+          )
           .addFields(
             {
               name: "🆕 Nuevas",
-              value: `${stats.joins}`,
+              value:
+                `${stats.joins}`,
               inline: true
             },
             {
               name: "🚪 Salieron",
-              value: `${stats.leaves}`,
+              value:
+                `${stats.leaves}`,
               inline: true
             },
             {
               name: "👥 En servidor",
-              value: `${inside.length}`,
+              value:
+                `${inside.length}`,
               inline: true
             },
             {
-              name: "♟️ Usuarios invitados",
+              name:
+                "♟️ Usuarios invitados",
               value: list
             }
+          )
+          .setFooter({
+            text:
+              "Fusake registra los invites desde que se activó el sistema."
+          })
+      ],
+      ephemeral: true
+    });
+  }
+
+  // ====================================================
+  // NUEVO /REACROL
+  // ====================================================
+
+  if (cmd === "reacrol") {
+    const messageId =
+      interaction.options.getString(
+        "id_mensaje",
+        true
+      );
+
+    const role =
+      interaction.options.getRole(
+        "rol",
+        true
+      );
+
+    const emoji =
+      interaction.options.getString(
+        "emoji",
+        true
+      );
+
+    const type =
+      interaction.options.getString(
+        "tipo",
+        true
+      );
+
+    const label =
+      interaction.options.getString(
+        "mensaje",
+        true
+      );
+
+    if (
+      role.position >=
+      interaction.guild.members.me.roles.highest.position
+    ) {
+      return interaction.reply({
+        content:
+          "❌ Ese rol está por encima del rol de Fusake. Mové el rol de Fusake por encima.",
+        ephemeral: true
+      });
+    }
+
+    const targetMessage =
+      await interaction.channel.messages
+        .fetch(messageId)
+        .catch(() => null);
+
+    if (!targetMessage) {
+      return interaction.reply({
+        content:
+          "❌ No encontré ese mensaje en este canal. Asegurate de copiar correctamente su ID.",
+        ephemeral: true
+      });
+    }
+
+    let panel =
+      d.reactionRoles[messageId];
+
+    if (!panel) {
+      panel = {
+        messageId,
+        channelId: interaction.channel.id,
+        type,
+        options: []
+      };
+
+      d.reactionRoles[messageId] = panel;
+    }
+
+    if (panel.type !== type) {
+      return interaction.reply({
+        content:
+          `❌ Ese mensaje ya tiene un sistema **${panel.type}**.\nNo podés mezclar MENÚ y BOTONES en el mismo panel.`,
+        ephemeral: true
+      });
+    }
+
+    const alreadyExists =
+      panel.options.some(
+        option =>
+          option.roleId === role.id
+      );
+
+    if (alreadyExists) {
+      return interaction.reply({
+        content:
+          "❌ Ese rol ya está agregado en este panel.",
+        ephemeral: true
+      });
+    }
+
+    if (panel.options.length >= 25) {
+      return interaction.reply({
+        content:
+          "❌ Este panel ya llegó al máximo de **25 roles**.",
+        ephemeral: true
+      });
+    }
+
+    panel.options.push({
+      roleId: role.id,
+      emoji,
+      label
+    });
+
+    saveData();
+
+    try {
+      await updateReactionRoleMessage(
+        interaction.guild,
+        panel
+      );
+    } catch (error) {
+      panel.options =
+        panel.options.filter(
+          option =>
+            option.roleId !== role.id
+        );
+
+      if (!panel.options.length) {
+        delete d.reactionRoles[messageId];
+      }
+
+      saveData();
+
+      return interaction.reply({
+        content:
+          `❌ No pude agregar el menú/botón al mensaje.\nRevisa el emoji y el ID del mensaje.\n\nError: \`${error.message}\``,
+        ephemeral: true
+      });
+    }
+
+    return interaction.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0x2ecc71)
+          .setTitle(
+            "✅ ROL INTERACTIVO AGREGADO"
+          )
+          .setDescription(
+            `🎭 **Rol:** ${role}
+${emoji} **Opción:** ${label}
+🎛️ **Tipo:** ${type === "MENU" ? "Menú desplegable" : "Botón"}
+🆔 **Mensaje:** \`${messageId}\`
+
+${
+  type === "MENU"
+    ? "♟️ Los usuarios solo podrán tener **1 rol de este menú**. Si eligen otro, Fusake quitará automáticamente el anterior."
+    : "🃏 Los usuarios podrán elegir **todos los roles que quieran**. Si vuelven a pulsar un botón, Fusake les quitará ese rol."
+}`
           )
       ],
       ephemeral: true
     });
   }
 
-  // SORTEO
+  // ====================================================
+  // SORTEO CON REQUISITOS
+  // ====================================================
+
   if (cmd === "sorteo") {
     const timeText =
       interaction.options.getString(
@@ -3789,6 +3976,11 @@ client.on("interactionCreate", async interaction => {
         true
       );
 
+    const requirementsText =
+      interaction.options.getString(
+        "requisitos"
+      ) || "";
+
     const time =
       parseDuration(timeText);
 
@@ -3796,6 +3988,21 @@ client.on("interactionCreate", async interaction => {
       return interaction.reply({
         content:
           "❌ Tiempo inválido. Ejemplos: `30m`, `1h`, `1h30m`, `2d`.",
+        ephemeral: true
+      });
+    }
+
+    const parsedRequirements =
+      parseRequirements(requirementsText);
+
+    if (
+      requirementsText &&
+      !parsedRequirements.invites &&
+      !parsedRequirements.messages
+    ) {
+      return interaction.reply({
+        content:
+          "❌ No entendí los requisitos.\n\nEjemplos:\n`5 invites`\n`1000 mensajes`\n`5 invites, 1000 mensajes`",
         ephemeral: true
       });
     }
@@ -3808,30 +4015,19 @@ client.on("interactionCreate", async interaction => {
           interaction.user.id,
           time,
           winners,
-          prize
+          prize,
+          requirementsText
         );
 
-      await interaction.reply({
+      return interaction.reply({
         content:
           `🎉 Sorteo creado.\n🆔 ID: \`${giveaway.id}\``,
         ephemeral: true
       });
-
-      await sendLog(
-        interaction.guild,
-        "SORTEO CREADO",
-        `🏆 **Premio:** ${prize}
-👑 **Ganadores:** ${winners}
-⏰ **Duración:** ${timeText}
-👤 **Creado por:** ${interaction.user.tag}`
-      );
-
-      return;
-    } catch (error) {
-      console.error(error);
-
+    } catch {
       return interaction.reply({
-        content: "❌ No pude crear el sorteo.",
+        content:
+          "❌ No pude crear el sorteo.",
         ephemeral: true
       });
     }
@@ -3886,7 +4082,6 @@ client.on("interactionCreate", async interaction => {
     );
   }
 
-  // BAN
   if (cmd === "ban") {
     const user =
       interaction.options.getUser(
@@ -3895,7 +4090,9 @@ client.on("interactionCreate", async interaction => {
       );
 
     const reason =
-      interaction.options.getString("razon") ||
+      interaction.options.getString(
+        "razon"
+      ) ||
       "Sin razón especificada";
 
     const member =
@@ -3903,7 +4100,15 @@ client.on("interactionCreate", async interaction => {
         .fetch(user.id)
         .catch(() => null);
 
-    if (!member?.bannable) {
+    if (!member) {
+      return interaction.reply({
+        content:
+          "❌ Usuario no encontrado.",
+        ephemeral: true
+      });
+    }
+
+    if (!member.bannable) {
       return interaction.reply({
         content:
           "❌ No puedo banear a ese usuario.",
@@ -3912,14 +4117,17 @@ client.on("interactionCreate", async interaction => {
     }
 
     try {
-      await member.ban({ reason });
+      await member.ban({
+        reason
+      });
 
       await sendLog(
         interaction.guild,
         "USUARIO BANEADO",
-        `👤 **Usuario:** ${user.tag}
-👑 **Moderador:** ${interaction.user.tag}
-📝 **Razón:** ${reason}`
+        `**Usuario:** ${user.tag}
+**Moderador:** ${interaction.user.tag}
+**Razón:** ${reason}`,
+        0xe74c3c
       );
 
       return interaction.reply({
@@ -3936,7 +4144,6 @@ client.on("interactionCreate", async interaction => {
     }
   }
 
-  // KICK
   if (cmd === "kick") {
     const user =
       interaction.options.getUser(
@@ -3945,7 +4152,9 @@ client.on("interactionCreate", async interaction => {
       );
 
     const reason =
-      interaction.options.getString("razon") ||
+      interaction.options.getString(
+        "razon"
+      ) ||
       "Sin razón especificada";
 
     const member =
@@ -3967,9 +4176,9 @@ client.on("interactionCreate", async interaction => {
       await sendLog(
         interaction.guild,
         "USUARIO EXPULSADO",
-        `👤 **Usuario:** ${user.tag}
-👑 **Moderador:** ${interaction.user.tag}
-📝 **Razón:** ${reason}`
+        `**Usuario:** ${user.tag}
+**Moderador:** ${interaction.user.tag}
+**Razón:** ${reason}`
       );
 
       return interaction.reply({
@@ -3986,7 +4195,6 @@ client.on("interactionCreate", async interaction => {
     }
   }
 
-  // TIMEOUT
   if (cmd === "timeout") {
     const user =
       interaction.options.getUser(
@@ -4019,14 +4227,6 @@ client.on("interactionCreate", async interaction => {
         `Aplicado por ${interaction.user.tag}`
       );
 
-      await sendLog(
-        interaction.guild,
-        "TIMEOUT APLICADO",
-        `👤 **Usuario:** ${user.tag}
-⏰ **Duración:** ${minutes} minutos
-👑 **Moderador:** ${interaction.user.tag}`
-      );
-
       return interaction.reply({
         content:
           `⏳ **${user.tag}** recibió timeout de **${minutes} minutos**.`,
@@ -4041,7 +4241,6 @@ client.on("interactionCreate", async interaction => {
     }
   }
 
-  // UNTIMEOUT
   if (cmd === "untimeout") {
     const user =
       interaction.options.getUser(
@@ -4065,13 +4264,6 @@ client.on("interactionCreate", async interaction => {
     try {
       await member.timeout(null);
 
-      await sendLog(
-        interaction.guild,
-        "TIMEOUT RETIRADO",
-        `👤 **Usuario:** ${user.tag}
-👑 **Moderador:** ${interaction.user.tag}`
-      );
-
       return interaction.reply({
         content:
           `🃏 Timeout retirado a **${user.tag}**.`,
@@ -4086,7 +4278,6 @@ client.on("interactionCreate", async interaction => {
     }
   }
 
-  // PURGE
   if (cmd === "purge") {
     const amount =
       interaction.options.getInteger(
@@ -4105,14 +4296,6 @@ client.on("interactionCreate", async interaction => {
           true
         );
 
-      await sendLog(
-        interaction.guild,
-        "MENSAJES ELIMINADOS",
-        `👑 **Administrador:** ${interaction.user.tag}
-💬 **Canal:** ${interaction.channel}
-🧹 **Cantidad:** ${deleted.size}`
-      );
-
       return interaction.editReply(
         `♟️🧹 Se eliminaron **${deleted.size} mensajes**.`
       );
@@ -4123,20 +4306,19 @@ client.on("interactionCreate", async interaction => {
     }
   }
 
-  // SERVER INFO
   if (cmd === "serverinfo") {
     return interaction.reply({
       embeds: [
         new EmbedBuilder()
-          .setColor(RED)
+          .setColor(0x3498db)
           .setTitle(
-            `♦️♟️ ${interaction.guild.name} 🃏`
+            `♟️🃏 ${interaction.guild.name}`
           )
           .setThumbnail(
             interaction.guild.iconURL()
           )
           .setDescription(
-`👑 Dueño: <@${interaction.guild.ownerId}>
+            `👑 Dueño: <@${interaction.guild.ownerId}>
 👥 Miembros: ${interaction.guild.memberCount}
 💬 Canales: ${interaction.guild.channels.cache.size}
 🎭 Roles: ${interaction.guild.roles.cache.size}
@@ -4148,10 +4330,11 @@ client.on("interactionCreate", async interaction => {
     });
   }
 
-  // USER INFO
   if (cmd === "userinfo") {
     const user =
-      interaction.options.getUser("usuario") ||
+      interaction.options.getUser(
+        "usuario"
+      ) ||
       interaction.user;
 
     const member =
@@ -4162,9 +4345,13 @@ client.on("interactionCreate", async interaction => {
     return interaction.reply({
       embeds: [
         new EmbedBuilder()
-          .setColor(RED)
-          .setTitle(`♦️♟️ ${user.tag}`)
-          .setThumbnail(user.displayAvatarURL())
+          .setColor(0x3498db)
+          .setTitle(
+            `♟️🃏 ${user.tag}`
+          )
+          .setThumbnail(
+            user.displayAvatarURL()
+          )
           .addFields(
             {
               name: "🆔 ID",
@@ -4175,7 +4362,8 @@ client.on("interactionCreate", async interaction => {
               name: "📅 Cuenta creada",
               value:
                 `<t:${Math.floor(
-                  user.createdTimestamp / 1000
+                  user.createdTimestamp /
+                    1000
                 )}:F>`
             },
             {
@@ -4183,7 +4371,8 @@ client.on("interactionCreate", async interaction => {
               value:
                 member?.joinedTimestamp
                   ? `<t:${Math.floor(
-                      member.joinedTimestamp / 1000
+                      member.joinedTimestamp /
+                        1000
                     )}:F>`
                   : "Desconocido"
             }
@@ -4195,23 +4384,7 @@ client.on("interactionCreate", async interaction => {
 });
 
 // ======================================================
-// ERRORES
-// ======================================================
-
-client.on("error", error => {
-  console.error("❌ Error del cliente Discord:", error);
-});
-
-process.on("unhandledRejection", error => {
-  console.error("❌ Promesa no manejada:", error);
-});
-
-process.on("uncaughtException", error => {
-  console.error("❌ Excepción no controlada:", error);
-});
-
-// ======================================================
-// HTTP
+// SERVIDOR HTTP
 // ======================================================
 
 const PORT =
@@ -4220,14 +4393,17 @@ const PORT =
 http
   .createServer((req, res) => {
     res.writeHead(200, {
-      "Content-Type": "text/plain; charset=utf-8"
+      "Content-Type":
+        "text/plain; charset=utf-8"
     });
 
-    res.end("♦️♟️ Fusake online 🃏");
+    res.end(
+      "♟️🃏 Fusake online"
+    );
   })
   .listen(PORT, () => {
     console.log(
-      `🌐 Servidor web activo en puerto ${PORT}`
+      `🌐 Servidor web activo en el puerto ${PORT}`
     );
   });
 
