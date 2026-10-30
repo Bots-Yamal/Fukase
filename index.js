@@ -142,14 +142,15 @@ async function askFusakeAI(userId, username, question) {
   history = history.slice(-12);
 
   const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(
-      GEMINI_API_KEY
-    )}`,
+    "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent",
     {
       method: "POST",
+
       headers: {
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "x-goog-api-key": GEMINI_API_KEY
       },
+
       body: JSON.stringify({
         systemInstruction: {
           parts: [
@@ -169,15 +170,32 @@ async function askFusakeAI(userId, username, question) {
     }
   );
 
-  const result = await response.json();
+  let result;
+
+  try {
+    result = await response.json();
+  } catch (error) {
+    console.error(
+      "❌ Gemini devolvió una respuesta que no era JSON:",
+      error
+    );
+
+    throw new Error("GEMINI_INVALID_RESPONSE");
+  }
 
   if (!response.ok) {
     console.error(
-      "❌ Error de Gemini:",
+      `❌ GEMINI HTTP ${response.status} ${response.statusText}`
+    );
+
+    console.error(
+      "❌ RESPUESTA DE GEMINI:",
       JSON.stringify(result, null, 2)
     );
 
-    throw new Error("GEMINI_ERROR");
+    throw new Error(
+      `GEMINI_HTTP_${response.status}`
+    );
   }
 
   const answer =
@@ -187,6 +205,14 @@ async function askFusakeAI(userId, username, question) {
       .trim();
 
   if (!answer) {
+    console.error(
+      "❌ Gemini respondió pero no devolvió texto:"
+    );
+
+    console.error(
+      JSON.stringify(result, null, 2)
+    );
+
     throw new Error("EMPTY_RESPONSE");
   }
 
@@ -834,11 +860,8 @@ const help = {
     "b!clearlogs",
     "b!invite #canal",
     "b!invite off",
-
-    // NUEVO
     "b!net #canal",
     "b!net off",
-
     "b!autorespuestas palabra respuesta",
     "b!autoreacciones palabra emoji",
     "b!delreply palabra",
@@ -2410,8 +2433,6 @@ client.on(
         );
       }
 
-      // Si el admin configuró un canal,
-      // solamente funcionará ahí.
       if (
         d.aiChannel &&
         message.channel.id !==
@@ -2441,7 +2462,6 @@ client.on(
             question
           );
 
-        // Respuesta normal
         if (
           answer.length <=
           2000
@@ -2454,8 +2474,6 @@ client.on(
           });
         }
 
-        // Si Gemini genera más de 2000 caracteres,
-        // dividir la respuesta.
         const chunks =
           answer.match(
             /[\s\S]{1,1900}/g
@@ -3055,8 +3073,8 @@ A partir de ahora **b!n** solamente funcionará en ${channel}.`
 // FIN PARTE 1/2
 // PEGA LA PARTE 2 JUSTO DEBAJO DE ESTA LÍNEA
 // NO CIERRES messageCreate TODAVÍA
-// ======================================================
-      // ==================================================
+// ====================================================
+    // ==================================================
     // MODERACIÓN
     // ==================================================
 
