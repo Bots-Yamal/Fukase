@@ -10,6 +10,7 @@
     "node": ">=18"
   },
   "dependencies": {
-    "discord.js": "^14.22.1"
+    "discord.js": "^14.22.1",
+    "@google/generative-ai": "^0.24.1"
   }
 }
