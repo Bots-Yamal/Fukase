@@ -18,10 +18,11 @@ const PREFIX = "b!";
 const DATA_FILE = "./welcome-config.json";
 
 // ======================================================
-// GEMINI IA
+// OPENROUTER IA
 // ======================================================
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const OPENROUTER_API_KEY =
+  process.env.OPENROUTER_API_KEY;
 
 // Memoria temporal independiente para cada usuario
 const aiConversations = new Map();
@@ -121,51 +122,60 @@ REGLAS DE PERSONALIDAD:
 - No inventes recuerdos que no estén en la conversación.
 `;
 
-async function askFusakeAI(userId, username, question) {
-  if (!GEMINI_API_KEY) {
-    throw new Error("NO_GEMINI_KEY");
+async function askFusakeAI(
+  userId,
+  username,
+  question
+) {
+  if (!OPENROUTER_API_KEY) {
+    throw new Error(
+      "NO_OPENROUTER_KEY"
+    );
   }
 
-  let history = aiConversations.get(userId) || [];
+  let history =
+    aiConversations.get(userId) ||
+    [];
 
   history.push({
     role: "user",
-    parts: [
-      {
-        text: `${username}: ${question}`
-      }
-    ]
+    content:
+      `${username}: ${question}`
   });
 
-  // Conservamos una conversación corta para no gastar
-  // demasiados tokens.
+  // Guardamos solamente los últimos mensajes
+  // para no gastar contexto innecesariamente.
   history = history.slice(-12);
 
   const response = await fetch(
-    "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent",
+    "https://openrouter.ai/api/v1/chat/completions",
     {
       method: "POST",
 
       headers: {
-        "Content-Type": "application/json",
-        "x-goog-api-key": GEMINI_API_KEY
+        "Content-Type":
+          "application/json",
+
+        "Authorization":
+          `Bearer ${OPENROUTER_API_KEY}`
       },
 
       body: JSON.stringify({
-        systemInstruction: {
-          parts: [
-            {
-              text: FUSAKE_PERSONALITY
-            }
-          ]
-        },
+        model: "openrouter/free",
 
-        contents: history,
+        messages: [
+          {
+            role: "system",
+            content:
+              FUSAKE_PERSONALITY
+          },
 
-        generationConfig: {
-          temperature: 1,
-          maxOutputTokens: 700
-        }
+          ...history
+        ],
+
+        temperature: 1,
+
+        max_tokens: 700
       })
     }
   );
@@ -173,56 +183,64 @@ async function askFusakeAI(userId, username, question) {
   let result;
 
   try {
-    result = await response.json();
+    result =
+      await response.json();
   } catch (error) {
     console.error(
-      "❌ Gemini devolvió una respuesta que no era JSON:",
+      "❌ OpenRouter devolvió una respuesta que no era JSON:",
       error
     );
 
-    throw new Error("GEMINI_INVALID_RESPONSE");
+    throw new Error(
+      "OPENROUTER_INVALID_RESPONSE"
+    );
   }
 
   if (!response.ok) {
     console.error(
-      `❌ GEMINI HTTP ${response.status} ${response.statusText}`
+      `❌ OPENROUTER HTTP ${response.status} ${response.statusText}`
     );
 
     console.error(
-      "❌ RESPUESTA DE GEMINI:",
-      JSON.stringify(result, null, 2)
+      "❌ RESPUESTA DE OPENROUTER:",
+      JSON.stringify(
+        result,
+        null,
+        2
+      )
     );
 
     throw new Error(
-      `GEMINI_HTTP_${response.status}`
+      `OPENROUTER_HTTP_${response.status}`
     );
   }
 
   const answer =
-    result.candidates?.[0]?.content?.parts
-      ?.map(part => part.text || "")
-      .join("")
-      .trim();
+    result.choices?.[0]
+      ?.message?.content
+      ?.trim();
 
   if (!answer) {
     console.error(
-      "❌ Gemini respondió pero no devolvió texto:"
+      "❌ OpenRouter respondió pero no devolvió texto:"
     );
 
     console.error(
-      JSON.stringify(result, null, 2)
+      JSON.stringify(
+        result,
+        null,
+        2
+      )
     );
 
-    throw new Error("EMPTY_RESPONSE");
+    throw new Error(
+      "EMPTY_RESPONSE"
+    );
   }
 
   history.push({
-    role: "model",
-    parts: [
-      {
-        text: answer
-      }
-    ]
+    role: "assistant",
+    content: answer
   });
 
   aiConversations.set(
@@ -257,7 +275,10 @@ let data = {};
 if (fs.existsSync(DATA_FILE)) {
   try {
     data = JSON.parse(
-      fs.readFileSync(DATA_FILE, "utf8")
+      fs.readFileSync(
+        DATA_FILE,
+        "utf8"
+      )
     );
   } catch {
     data = {};
@@ -293,7 +314,11 @@ function saveData() {
   try {
     fs.writeFileSync(
       DATA_FILE,
-      JSON.stringify(data, null, 2)
+      JSON.stringify(
+        data,
+        null,
+        2
+      )
     );
   } catch (error) {
     console.error(
@@ -311,9 +336,16 @@ function getGuildData(id) {
 
   const def = defaults();
 
-  for (const key of Object.keys(def)) {
-    if (data[id][key] === undefined) {
-      data[id][key] = def[key];
+  for (
+    const key of
+      Object.keys(def)
+  ) {
+    if (
+      data[id][key] ===
+      undefined
+    ) {
+      data[id][key] =
+        def[key];
     }
   }
 
@@ -332,8 +364,12 @@ function isAdmin(member) {
   );
 }
 
-async function adminOnlyMessage(message) {
-  if (isAdmin(message.member)) return true;
+async function adminOnlyMessage(
+  message
+) {
+  if (isAdmin(message.member)) {
+    return true;
+  }
 
   await message.reply(
     "🚫 Solo los administradores pueden usar los comandos administrativos de Fusake."
@@ -342,8 +378,14 @@ async function adminOnlyMessage(message) {
   return false;
 }
 
-async function adminOnlyInteraction(interaction) {
-  if (isAdmin(interaction.member)) return true;
+async function adminOnlyInteraction(
+  interaction
+) {
+  if (
+    isAdmin(interaction.member)
+  ) {
+    return true;
+  }
 
   await interaction.reply({
     content:
@@ -355,34 +397,58 @@ async function adminOnlyInteraction(interaction) {
 }
 
 const mentionedMember =
-  message => message.mentions.members.first();
+  message =>
+    message.mentions.members.first();
 
 const mentionedRole =
-  message => message.mentions.roles.first();
+  message =>
+    message.mentions.roles.first();
 
 const mentionedChannel =
-  message => message.mentions.channels.first();
+  message =>
+    message.mentions.channels.first();
 
 function duration(ms) {
-  const s = Math.floor(ms / 1000);
+  const s =
+    Math.floor(ms / 1000);
 
-  const days = Math.floor(s / 86400);
-  const hours = Math.floor(
-    (s % 86400) / 3600
-  );
-  const minutes = Math.floor(
-    (s % 3600) / 60
-  );
-  const seconds = s % 60;
+  const days =
+    Math.floor(s / 86400);
+
+  const hours =
+    Math.floor(
+      (s % 86400) / 3600
+    );
+
+  const minutes =
+    Math.floor(
+      (s % 3600) / 60
+    );
+
+  const seconds =
+    s % 60;
 
   const parts = [];
 
-  if (days) parts.push(`${days}d`);
-  if (hours) parts.push(`${hours}h`);
-  if (minutes) parts.push(`${minutes}m`);
+  if (days) {
+    parts.push(`${days}d`);
+  }
 
-  if (seconds || !parts.length) {
-    parts.push(`${seconds}s`);
+  if (hours) {
+    parts.push(`${hours}h`);
+  }
+
+  if (minutes) {
+    parts.push(`${minutes}m`);
+  }
+
+  if (
+    seconds ||
+    !parts.length
+  ) {
+    parts.push(
+      `${seconds}s`
+    );
   }
 
   return parts.join(" ");
@@ -391,38 +457,49 @@ function duration(ms) {
 function parseDuration(input) {
   if (!input) return null;
 
-  const clean = input
-    .toLowerCase()
-    .replace(/\s+/g, "");
+  const clean =
+    input
+      .toLowerCase()
+      .replace(/\s+/g, "");
 
-  const regex = /(\d+)(d|h|m|s)/g;
+  const regex =
+    /(\d+)(d|h|m|s)/g;
 
   let total = 0;
   let match;
   let matched = "";
 
   while (
-    (match = regex.exec(clean)) !== null
+    (match =
+      regex.exec(clean)) !==
+    null
   ) {
-    const amount = Number(match[1]);
-    const unit = match[2];
+    const amount =
+      Number(match[1]);
+
+    const unit =
+      match[2];
 
     matched += match[0];
 
     if (unit === "d") {
-      total += amount * 86400000;
+      total +=
+        amount * 86400000;
     }
 
     if (unit === "h") {
-      total += amount * 3600000;
+      total +=
+        amount * 3600000;
     }
 
     if (unit === "m") {
-      total += amount * 60000;
+      total +=
+        amount * 60000;
     }
 
     if (unit === "s") {
-      total += amount * 1000;
+      total +=
+        amount * 1000;
     }
   }
 
@@ -443,25 +520,32 @@ function parseColor(input) {
     input.replace("#", "");
 
   if (
-    !/^[0-9a-fA-F]{6}$/.test(value)
+    !/^[0-9a-fA-F]{6}$/.test(
+      value
+    )
   ) {
     return null;
   }
 
-  return parseInt(value, 16);
+  return parseInt(
+    value,
+    16
+  );
 }
 
 function shuffle(array) {
   const arr = [...array];
 
   for (
-    let i = arr.length - 1;
+    let i =
+      arr.length - 1;
     i > 0;
     i--
   ) {
     const j =
       Math.floor(
-        Math.random() * (i + 1)
+        Math.random() *
+          (i + 1)
       );
 
     [arr[i], arr[j]] =
@@ -482,7 +566,10 @@ function parseRequirements(text) {
     raw: text || ""
   };
 
-  if (!text || !text.trim()) {
+  if (
+    !text ||
+    !text.trim()
+  ) {
     return requirements;
   }
 
@@ -506,19 +593,26 @@ function parseRequirements(text) {
 
   if (messageMatch) {
     requirements.messages =
-      Number(messageMatch[1]);
+      Number(
+        messageMatch[1]
+      );
   }
 
   return requirements;
 }
 
-function requirementText(giveaway) {
+function requirementText(
+  giveaway
+) {
   const req =
     giveaway.requirements;
 
   if (
     !req ||
-    (!req.invites && !req.messages)
+    (
+      !req.invites &&
+      !req.messages
+    )
   ) {
     return "Ninguno";
   }
@@ -548,10 +642,16 @@ function getUserInviteCount(
     getGuildData(guild.id);
 
   const stats =
-    inviteStats(d, userId);
+    inviteStats(
+      d,
+      userId
+    );
 
-  return stats.members.filter(id =>
-    guild.members.cache.has(id)
+  return stats.members.filter(
+    id =>
+      guild.members.cache.has(
+        id
+      )
   ).length;
 }
 
@@ -562,7 +662,11 @@ function getUserMessageCount(
   const d =
     getGuildData(guild.id);
 
-  return d.messageCounts[userId] || 0;
+  return (
+    d.messageCounts[
+      userId
+    ] || 0
+  );
 }
 
 function checkGiveawayRequirements(
@@ -591,7 +695,8 @@ function checkGiveawayRequirements(
   const failed = [];
 
   if (
-    requirements.invites > 0 &&
+    requirements.invites >
+      0 &&
     currentInvites <
       requirements.invites
   ) {
@@ -601,7 +706,8 @@ function checkGiveawayRequirements(
   }
 
   if (
-    requirements.messages > 0 &&
+    requirements.messages >
+      0 &&
     currentMessages <
       requirements.messages
   ) {
@@ -611,7 +717,8 @@ function checkGiveawayRequirements(
   }
 
   return {
-    ok: failed.length === 0,
+    ok:
+      failed.length === 0,
     failed,
     currentInvites,
     currentMessages
@@ -627,8 +734,9 @@ function getReactionRolePanel(
   messageId
 ) {
   return (
-    d.reactionRoles?.[messageId] ||
-    null
+    d.reactionRoles?.[
+      messageId
+    ] || null
   );
 }
 
@@ -637,12 +745,16 @@ function makeReactionRoleComponents(
 ) {
   if (
     !panel ||
-    !Array.isArray(panel.options)
+    !Array.isArray(
+      panel.options
+    )
   ) {
     return [];
   }
 
-  if (panel.type === "MENU") {
+  if (
+    panel.type === "MENU"
+  ) {
     const options =
       panel.options
         .slice(0, 25)
@@ -653,7 +765,10 @@ function makeReactionRoleComponents(
                 0,
                 100
               ),
-            value: option.roleId,
+
+            value:
+              option.roleId,
+
             description:
               `Obtener el rol ${option.label}`.slice(
                 0,
@@ -690,11 +805,16 @@ function makeReactionRoleComponents(
     ];
   }
 
-  if (panel.type === "BOTON") {
+  if (
+    panel.type === "BOTON"
+  ) {
     const rows = [];
 
     const options =
-      panel.options.slice(0, 25);
+      panel.options.slice(
+        0,
+        25
+      );
 
     for (
       let i = 0;
@@ -706,7 +826,10 @@ function makeReactionRoleComponents(
 
       for (
         const option of
-          options.slice(i, i + 5)
+          options.slice(
+            i,
+            i + 5
+          )
       ) {
         const button =
           new ButtonBuilder()
@@ -729,7 +852,9 @@ function makeReactionRoleComponents(
           );
         }
 
-        row.addComponents(button);
+        row.addComponents(
+          button
+        );
       }
 
       rows.push(row);
@@ -750,7 +875,9 @@ async function updateReactionRoleMessage(
       panel.channelId
     );
 
-  if (!channel?.isTextBased()) {
+  if (
+    !channel?.isTextBased()
+  ) {
     throw new Error(
       "CHANNEL_NOT_FOUND"
     );
@@ -786,7 +913,9 @@ async function sendLog(
   const d =
     getGuildData(guild.id);
 
-  if (!d.logsChannel) return;
+  if (!d.logsChannel) {
+    return;
+  }
 
   const c =
     guild.channels.cache.get(
@@ -979,22 +1108,28 @@ function helpMenu() {
         )
         .addOptions([
           {
-            label: "Moderación",
-            value: "moderacion",
+            label:
+              "Moderación",
+            value:
+              "moderacion",
             emoji: "♟️",
             description:
               "Herramientas de moderación"
           },
           {
-            label: "Configuración",
-            value: "configuracion",
+            label:
+              "Configuración",
+            value:
+              "configuracion",
             emoji: "⚙️",
             description:
               "Configura Fusake"
           },
           {
-            label: "Servidor",
-            value: "servidor",
+            label:
+              "Servidor",
+            value:
+              "servidor",
             emoji: "🏠",
             description:
               "Información del servidor"
@@ -1014,8 +1149,10 @@ function helpMenu() {
               "Sistema de sorteos"
           },
           {
-            label: "Invitaciones",
-            value: "invitaciones",
+            label:
+              "Invitaciones",
+            value:
+              "invitaciones",
             emoji: "🔗",
             description:
               "Sistema de invitaciones"
@@ -1065,9 +1202,12 @@ Selecciona una categoría en el menú inferior.`
 // INVITACIONES
 // ======================================================
 
-const inviteCache = new Map();
+const inviteCache =
+  new Map();
 
-async function cacheInvites(guild) {
+async function cacheInvites(
+  guild
+) {
   try {
     const invites =
       await guild.invites.fetch();
@@ -1075,10 +1215,12 @@ async function cacheInvites(guild) {
     inviteCache.set(
       guild.id,
       new Map(
-        invites.map(invite => [
-          invite.code,
-          invite.uses || 0
-        ])
+        invites.map(
+          invite => [
+            invite.code,
+            invite.uses || 0
+          ]
+        )
       )
     );
   } catch (error) {
@@ -1088,10 +1230,13 @@ async function cacheInvites(guild) {
   }
 }
 
-async function detectInvite(guild) {
+async function detectInvite(
+  guild
+) {
   const before =
-    inviteCache.get(guild.id) ||
-    new Map();
+    inviteCache.get(
+      guild.id
+    ) || new Map();
 
   try {
     const after =
@@ -1104,13 +1249,16 @@ async function detectInvite(guild) {
         after.values()
     ) {
       const oldUses =
-        before.get(invite.code) ||
-        0;
+        before.get(
+          invite.code
+        ) || 0;
 
       const newUses =
         invite.uses || 0;
 
-      if (newUses > oldUses) {
+      if (
+        newUses > oldUses
+      ) {
         used = invite;
         break;
       }
@@ -1119,10 +1267,12 @@ async function detectInvite(guild) {
     inviteCache.set(
       guild.id,
       new Map(
-        after.map(invite => [
-          invite.code,
-          invite.uses || 0
-        ])
+        after.map(
+          invite => [
+            invite.code,
+            invite.uses || 0
+          ]
+        )
       )
     );
 
@@ -1137,9 +1287,13 @@ function inviteStats(
   inviterId
 ) {
   if (
-    !d.inviteUsers[inviterId]
+    !d.inviteUsers[
+      inviterId
+    ]
   ) {
-    d.inviteUsers[inviterId] = {
+    d.inviteUsers[
+      inviterId
+    ] = {
       joins: 0,
       leaves: 0,
       members: []
@@ -1165,12 +1319,16 @@ function giveawayButtons(
         .setCustomId(
           `giveaway_join:${id}`
         )
-        .setLabel("Participar")
+        .setLabel(
+          "Participar"
+        )
         .setEmoji("🎉")
         .setStyle(
           ButtonStyle.Success
         )
-        .setDisabled(disabled),
+        .setDisabled(
+          disabled
+        ),
 
       new ButtonBuilder()
         .setCustomId(
@@ -1191,7 +1349,8 @@ function giveawayEmbed(
 ) {
   const endUnix =
     Math.floor(
-      giveaway.endAt / 1000
+      giveaway.endAt /
+        1000
     );
 
   return new EmbedBuilder()
@@ -1230,7 +1389,9 @@ function selectWinners(
     0,
     Math.min(
       giveaway.winners,
-      giveaway.participants.length
+      giveaway
+        .participants
+        .length
     )
   );
 }
@@ -1241,10 +1402,14 @@ async function endGiveaway(
   reroll = false
 ) {
   const d =
-    getGuildData(guild.id);
+    getGuildData(
+      guild.id
+    );
 
   const giveaway =
-    d.giveaways[giveawayId];
+    d.giveaways[
+      giveawayId
+    ];
 
   if (!giveaway) {
     return {
@@ -1281,7 +1446,9 @@ async function endGiveaway(
   }
 
   const winners =
-    selectWinners(giveaway);
+    selectWinners(
+      giveaway
+    );
 
   if (!reroll) {
     giveaway.ended = true;
@@ -1299,7 +1466,9 @@ async function endGiveaway(
       await msg.edit({
         embeds: [
           new EmbedBuilder()
-            .setColor(0xe74c3c)
+            .setColor(
+              0xe74c3c
+            )
             .setTitle(
               "🎉🃏 SORTEO FINALIZADO"
             )
@@ -1312,7 +1481,8 @@ ${
   winners.length
     ? winners
         .map(
-          id => `<@${id}>`
+          id =>
+            `<@${id}>`
         )
         .join("\n")
     : "No hubo suficientes participantes."
@@ -1329,6 +1499,7 @@ ${requirementText(giveaway)}`
             })
             .setTimestamp()
         ],
+
         components: [
           giveawayButtons(
             giveaway.id,
@@ -1341,7 +1512,10 @@ ${requirementText(giveaway)}`
     if (winners.length) {
       await channel.send(
         `🎊 ¡Felicidades ${winners
-          .map(id => `<@${id}>`)
+          .map(
+            id =>
+              `<@${id}>`
+          )
           .join(", ")}! Ganaron **${giveaway.prize}**.`
       ).catch(() => {});
     } else {
@@ -1366,7 +1540,10 @@ ${requirementText(giveaway)}`
     if (winners.length) {
       await channel.send(
         `🔄🎉 **Nuevos ganadores de ${giveaway.prize}:** ${winners
-          .map(id => `<@${id}>`)
+          .map(
+            id =>
+              `<@${id}>`
+          )
           .join(", ")}`
       ).catch(() => {});
     }
@@ -1397,7 +1574,9 @@ async function createGiveaway(
   }
 
   if (
-    !Number.isInteger(winners) ||
+    !Number.isInteger(
+      winners
+    ) ||
     winners < 1 ||
     winners > 50
   ) {
@@ -1413,14 +1592,19 @@ async function createGiveaway(
   }
 
   const d =
-    getGuildData(guild.id);
+    getGuildData(
+      guild.id
+    );
 
-  const id = `${Date.now()}`;
+  const id =
+    `${Date.now()}`;
 
   const giveaway = {
     id,
-    guildId: guild.id,
-    channelId: channel.id,
+    guildId:
+      guild.id,
+    channelId:
+      channel.id,
     messageId: null,
     creatorId,
     prize,
@@ -1430,7 +1614,8 @@ async function createGiveaway(
       parseRequirements(
         requirementsText
       ),
-    createdAt: Date.now(),
+    createdAt:
+      Date.now(),
     endAt:
       Date.now() + time,
     ended: false,
@@ -1447,6 +1632,7 @@ async function createGiveaway(
           giveaway
         )
       ],
+
       components: [
         giveawayButtons(id)
       ]
@@ -1514,46 +1700,60 @@ const slashCommands = [
     .setDescription(
       "Envía un embed personalizado"
     )
-    .addStringOption(option =>
-      option
-        .setName("color")
-        .setDescription(
-          "Color hexadecimal, ejemplo #ff0000"
-        )
-        .setRequired(true)
+    .addStringOption(
+      option =>
+        option
+          .setName("color")
+          .setDescription(
+            "Color hexadecimal, ejemplo #ff0000"
+          )
+          .setRequired(
+            true
+          )
     )
-    .addStringOption(option =>
-      option
-        .setName("mensaje")
-        .setDescription(
-          "Contenido del embed"
-        )
-        .setRequired(true)
+    .addStringOption(
+      option =>
+        option
+          .setName(
+            "mensaje"
+          )
+          .setDescription(
+            "Contenido del embed"
+          )
+          .setRequired(
+            true
+          )
     ),
 
   new SlashCommandBuilder()
-    .setName("bienvenida")
+    .setName(
+      "bienvenida"
+    )
     .setDescription(
       "Configura el canal de bienvenida"
     )
-    .addChannelOption(option =>
-      option
-        .setName("canal")
-        .setDescription(
-          "Canal de bienvenida"
-        )
-        .addChannelTypes(
-          ChannelType.GuildText
-        )
+    .addChannelOption(
+      option =>
+        option
+          .setName(
+            "canal"
+          )
+          .setDescription(
+            "Canal de bienvenida"
+          )
+          .addChannelTypes(
+            ChannelType.GuildText
+          )
     )
-    .addBooleanOption(option =>
-      option
-        .setName(
-          "desactivar"
-        )
-        .setDescription(
-          "Desactivar las bienvenidas"
-        )
+    .addBooleanOption(
+      option =>
+        option
+          .setName(
+            "desactivar"
+          )
+          .setDescription(
+            "Desactivar las bienvenidas"
+          )
     ),
 
   new SlashCommandBuilder()
@@ -1561,24 +1761,28 @@ const slashCommands = [
     .setDescription(
       "Configura el canal de logs"
     )
-    .addChannelOption(option =>
-      option
-        .setName("canal")
-        .setDescription(
-          "Canal de logs"
-        )
-        .addChannelTypes(
-          ChannelType.GuildText
-        )
+    .addChannelOption(
+      option =>
+        option
+          .setName(
+            "canal"
+          )
+          .setDescription(
+            "Canal de logs"
+          )
+          .addChannelTypes(
+            ChannelType.GuildText
+          )
     )
-    .addBooleanOption(option =>
-      option
-        .setName(
-          "desactivar"
-        )
-        .setDescription(
-          "Desactivar los logs"
-        )
+    .addBooleanOption(
+      option =>
+        option
+          .setName(
+            "desactivar"
+          )
+          .setDescription(
+            "Desactivar los logs"
+          )
     ),
 
   new SlashCommandBuilder()
@@ -1586,21 +1790,23 @@ const slashCommands = [
     .setDescription(
       "Configura el autorol"
     )
-    .addRoleOption(option =>
-      option
-        .setName("rol")
-        .setDescription(
-          "Rol automático"
-        )
+    .addRoleOption(
+      option =>
+        option
+          .setName("rol")
+          .setDescription(
+            "Rol automático"
+          )
     )
-    .addBooleanOption(option =>
-      option
-        .setName(
-          "desactivar"
-        )
-        .setDescription(
-          "Desactivar el autorol"
-        )
+    .addBooleanOption(
+      option =>
+        option
+          .setName(
+            "desactivar"
+          )
+          .setDescription(
+            "Desactivar el autorol"
+          )
     ),
 
   new SlashCommandBuilder()
@@ -1608,24 +1814,28 @@ const slashCommands = [
     .setDescription(
       "Configura el canal de mensajes de invitaciones"
     )
-    .addChannelOption(option =>
-      option
-        .setName("canal")
-        .setDescription(
-          "Canal donde aparecerán las nuevas invitaciones"
-        )
-        .addChannelTypes(
-          ChannelType.GuildText
-        )
+    .addChannelOption(
+      option =>
+        option
+          .setName(
+            "canal"
+          )
+          .setDescription(
+            "Canal donde aparecerán las nuevas invitaciones"
+          )
+          .addChannelTypes(
+            ChannelType.GuildText
+          )
     )
-    .addBooleanOption(option =>
-      option
-        .setName(
-          "desactivar"
-        )
-        .setDescription(
-          "Desactivar mensajes de invitaciones"
-        )
+    .addBooleanOption(
+      option =>
+        option
+          .setName(
+            "desactivar"
+          )
+          .setDescription(
+            "Desactivar mensajes de invitaciones"
+          )
     ),
 
   new SlashCommandBuilder()
@@ -1633,15 +1843,18 @@ const slashCommands = [
     .setDescription(
       "Muestra las invitaciones de un usuario"
     )
-    .addUserOption(option =>
-      option
-        .setName(
-          "usuario"
-        )
-        .setDescription(
-          "Usuario"
-        )
-        .setRequired(false)
+    .addUserOption(
+      option =>
+        option
+          .setName(
+            "usuario"
+          )
+          .setDescription(
+            "Usuario"
+          )
+          .setRequired(
+            false
+          )
     ),
 
   new SlashCommandBuilder()
@@ -1649,59 +1862,76 @@ const slashCommands = [
     .setDescription(
       "Agrega un rol interactivo a un mensaje"
     )
-    .addStringOption(option =>
-      option
-        .setName(
-          "id_mensaje"
-        )
-        .setDescription(
-          "ID del mensaje donde irá el menú o botón"
-        )
-        .setRequired(true)
+    .addStringOption(
+      option =>
+        option
+          .setName(
+            "id_mensaje"
+          )
+          .setDescription(
+            "ID del mensaje donde irá el menú o botón"
+          )
+          .setRequired(
+            true
+          )
     )
-    .addRoleOption(option =>
-      option
-        .setName("rol")
-        .setDescription(
-          "Rol que se otorgará"
-        )
-        .setRequired(true)
+    .addRoleOption(
+      option =>
+        option
+          .setName("rol")
+          .setDescription(
+            "Rol que se otorgará"
+          )
+          .setRequired(
+            true
+          )
     )
-    .addStringOption(option =>
-      option
-        .setName("emoji")
-        .setDescription(
-          "Emoji de la opción"
-        )
-        .setRequired(true)
+    .addStringOption(
+      option =>
+        option
+          .setName(
+            "emoji"
+          )
+          .setDescription(
+            "Emoji de la opción"
+          )
+          .setRequired(
+            true
+          )
     )
-    .addStringOption(option =>
-      option
-        .setName("tipo")
-        .setDescription(
-          "Menú o botón"
-        )
-        .setRequired(true)
-        .addChoices(
-          {
-            name: "Menú",
-            value: "MENU"
-          },
-          {
-            name: "Botón",
-            value: "BOTON"
-          }
-        )
+    .addStringOption(
+      option =>
+        option
+          .setName("tipo")
+          .setDescription(
+            "Menú o botón"
+          )
+          .setRequired(
+            true
+          )
+          .addChoices(
+            {
+              name: "Menú",
+              value: "MENU"
+            },
+            {
+              name: "Botón",
+              value: "BOTON"
+            }
+          )
     )
-    .addStringOption(option =>
-      option
-        .setName(
-          "mensaje"
-        )
-        .setDescription(
-          "Nombre que aparecerá en la opción"
-        )
-        .setRequired(true)
+    .addStringOption(
+      option =>
+        option
+          .setName(
+            "mensaje"
+          )
+          .setDescription(
+            "Nombre que aparecerá en la opción"
+          )
+          .setRequired(
+            true
+          )
     ),
 
   new SlashCommandBuilder()
@@ -1709,47 +1939,59 @@ const slashCommands = [
     .setDescription(
       "Crea un sorteo"
     )
-    .addStringOption(option =>
-      option
-        .setName(
-          "tiempo"
-        )
-        .setDescription(
-          "Ejemplo: 1h30m"
-        )
-        .setRequired(true)
+    .addStringOption(
+      option =>
+        option
+          .setName(
+            "tiempo"
+          )
+          .setDescription(
+            "Ejemplo: 1h30m"
+          )
+          .setRequired(
+            true
+          )
     )
-    .addIntegerOption(option =>
-      option
-        .setName(
-          "ganadores"
-        )
-        .setDescription(
-          "Cantidad de ganadores"
-        )
-        .setMinValue(1)
-        .setMaxValue(50)
-        .setRequired(true)
+    .addIntegerOption(
+      option =>
+        option
+          .setName(
+            "ganadores"
+          )
+          .setDescription(
+            "Cantidad de ganadores"
+          )
+          .setMinValue(1)
+          .setMaxValue(50)
+          .setRequired(
+            true
+          )
     )
-    .addStringOption(option =>
-      option
-        .setName(
-          "premio"
-        )
-        .setDescription(
-          "Premio del sorteo"
-        )
-        .setRequired(true)
+    .addStringOption(
+      option =>
+        option
+          .setName(
+            "premio"
+          )
+          .setDescription(
+            "Premio del sorteo"
+          )
+          .setRequired(
+            true
+          )
     )
-    .addStringOption(option =>
-      option
-        .setName(
-          "requisitos"
-        )
-        .setDescription(
-          "Ej: 5 invites, 1000 mensajes"
-        )
-        .setRequired(false)
+    .addStringOption(
+      option =>
+        option
+          .setName(
+            "requisitos"
+          )
+          .setDescription(
+            "Ej: 5 invites, 1000 mensajes"
+          )
+          .setRequired(
+            false
+          )
     ),
 
   new SlashCommandBuilder()
@@ -1759,13 +2001,16 @@ const slashCommands = [
     .setDescription(
       "Finaliza un sorteo"
     )
-    .addStringOption(option =>
-      option
-        .setName("id")
-        .setDescription(
-          "ID del sorteo"
-        )
-        .setRequired(true)
+    .addStringOption(
+      option =>
+        option
+          .setName("id")
+          .setDescription(
+            "ID del sorteo"
+          )
+          .setRequired(
+            true
+          )
     ),
 
   new SlashCommandBuilder()
@@ -1775,13 +2020,16 @@ const slashCommands = [
     .setDescription(
       "Elige nuevos ganadores"
     )
-    .addStringOption(option =>
-      option
-        .setName("id")
-        .setDescription(
-          "ID del sorteo"
-        )
-        .setRequired(true)
+    .addStringOption(
+      option =>
+        option
+          .setName("id")
+          .setDescription(
+            "ID del sorteo"
+          )
+          .setRequired(
+            true
+          )
     ),
 
   new SlashCommandBuilder()
@@ -1789,22 +2037,28 @@ const slashCommands = [
     .setDescription(
       "Banea un usuario"
     )
-    .addUserOption(option =>
-      option
-        .setName(
-          "usuario"
-        )
-        .setDescription(
-          "Usuario"
-        )
-        .setRequired(true)
+    .addUserOption(
+      option =>
+        option
+          .setName(
+            "usuario"
+          )
+          .setDescription(
+            "Usuario"
+          )
+          .setRequired(
+            true
+          )
     )
-    .addStringOption(option =>
-      option
-        .setName("razon")
-        .setDescription(
-          "Razón"
-        )
+    .addStringOption(
+      option =>
+        option
+          .setName(
+            "razon"
+          )
+          .setDescription(
+            "Razón"
+          )
     ),
 
   new SlashCommandBuilder()
@@ -1812,22 +2066,28 @@ const slashCommands = [
     .setDescription(
       "Expulsa un usuario"
     )
-    .addUserOption(option =>
-      option
-        .setName(
-          "usuario"
-        )
-        .setDescription(
-          "Usuario"
-        )
-        .setRequired(true)
+    .addUserOption(
+      option =>
+        option
+          .setName(
+            "usuario"
+          )
+          .setDescription(
+            "Usuario"
+          )
+          .setRequired(
+            true
+          )
     )
-    .addStringOption(option =>
-      option
-        .setName("razon")
-        .setDescription(
-          "Razón"
-        )
+    .addStringOption(
+      option =>
+        option
+          .setName(
+            "razon"
+          )
+          .setDescription(
+            "Razón"
+          )
     ),
 
   new SlashCommandBuilder()
@@ -1835,29 +2095,35 @@ const slashCommands = [
     .setDescription(
       "Aplica timeout"
     )
-    .addUserOption(option =>
-      option
-        .setName(
-          "usuario"
-        )
-        .setDescription(
-          "Usuario"
-        )
-        .setRequired(true)
+    .addUserOption(
+      option =>
+        option
+          .setName(
+            "usuario"
+          )
+          .setDescription(
+            "Usuario"
+          )
+          .setRequired(
+            true
+          )
     )
-    .addIntegerOption(option =>
-      option
-        .setName(
-          "minutos"
-        )
-        .setDescription(
-          "Minutos"
-        )
-        .setMinValue(1)
-        .setMaxValue(
-          40320
-        )
-        .setRequired(true)
+    .addIntegerOption(
+      option =>
+        option
+          .setName(
+            "minutos"
+          )
+          .setDescription(
+            "Minutos"
+          )
+          .setMinValue(1)
+          .setMaxValue(
+            40320
+          )
+          .setRequired(
+            true
+          )
     ),
 
   new SlashCommandBuilder()
@@ -1867,15 +2133,18 @@ const slashCommands = [
     .setDescription(
       "Retira un timeout"
     )
-    .addUserOption(option =>
-      option
-        .setName(
-          "usuario"
-        )
-        .setDescription(
-          "Usuario"
-        )
-        .setRequired(true)
+    .addUserOption(
+      option =>
+        option
+          .setName(
+            "usuario"
+          )
+          .setDescription(
+            "Usuario"
+          )
+          .setRequired(
+            true
+          )
     ),
 
   new SlashCommandBuilder()
@@ -1883,17 +2152,20 @@ const slashCommands = [
     .setDescription(
       "Elimina mensajes"
     )
-    .addIntegerOption(option =>
-      option
-        .setName(
-          "cantidad"
-        )
-        .setDescription(
-          "1-100"
-        )
-        .setMinValue(1)
-        .setMaxValue(100)
-        .setRequired(true)
+    .addIntegerOption(
+      option =>
+        option
+          .setName(
+            "cantidad"
+          )
+          .setDescription(
+            "1-100"
+          )
+          .setMinValue(1)
+          .setMaxValue(100)
+          .setRequired(
+            true
+          )
     ),
 
   new SlashCommandBuilder()
@@ -1911,21 +2183,23 @@ const slashCommands = [
     .setDescription(
       "Información de un usuario"
     )
-    .addUserOption(option =>
-      option
-        .setName(
-          "usuario"
-        )
-        .setDescription(
-          "Usuario"
-        )
+    .addUserOption(
+      option =>
+        option
+          .setName(
+            "usuario"
+          )
+          .setDescription(
+            "Usuario"
+          )
     )
-].map(command =>
-  command
-    .setDefaultMemberPermissions(
-      PermissionFlagsBits.Administrator
-    )
-    .toJSON()
+].map(
+  command =>
+    command
+      .setDefaultMemberPermissions(
+        PermissionFlagsBits.Administrator
+      )
+      .toJSON()
 );
 
 // ======================================================
@@ -1948,9 +2222,9 @@ client.once(
     );
 
     console.log(
-      GEMINI_API_KEY
-        ? "🤖 Gemini IA: configurada"
-        : "⚠️ Gemini IA: falta GEMINI_API_KEY"
+      OPENROUTER_API_KEY
+        ? "🤖 OpenRouter IA: configurada"
+        : "⚠️ OpenRouter IA: falta OPENROUTER_API_KEY"
     );
 
     client.user.setPresence({
@@ -1965,9 +2239,10 @@ client.once(
     });
 
     try {
-      await client.application.commands.set(
-        slashCommands
-      );
+      await client.application
+        .commands.set(
+          slashCommands
+        );
 
       console.log(
         "✅ Slash commands registrados."
@@ -2116,7 +2391,8 @@ Has entrado a ―═★❯❯ RƐɗ KɪƝƓS ♦ .! .
 ♟️ Tu próximo movimiento puede cambiar la partida 🃏`
               )
               .setThumbnail(
-                member.user.displayAvatarURL()
+                member.user
+                  .displayAvatarURL()
               )
               .setFooter({
                 text:
@@ -2124,6 +2400,7 @@ Has entrado a ―═★❯❯ RƐɗ KɪƝƓS ♦ .! .
               })
               .setTimestamp()
           ],
+
           allowedMentions: {
             users: [
               member.id
@@ -2137,9 +2414,10 @@ Has entrado a ―═★❯❯ RƐɗ KɪƝƓS ♦ .! .
 
     if (d.autoRole) {
       const role =
-        member.guild.roles.cache.get(
-          d.autoRole
-        );
+        member.guild.roles
+          .cache.get(
+            d.autoRole
+          );
 
       if (
         role?.editable
@@ -2191,9 +2469,10 @@ Has entrado a ―═★❯❯ RƐɗ KɪƝƓS ♦ .! .
         d.inviteChannel
       ) {
         const channel =
-          member.guild.channels.cache.get(
-            d.inviteChannel
-          );
+          member.guild.channels
+            .cache.get(
+              d.inviteChannel
+            );
 
         if (
           channel?.isTextBased()
@@ -2201,9 +2480,9 @@ Has entrado a ―═★❯❯ RƐɗ KɪƝƓS ♦ .! .
           const currentMembers =
             stats.members.filter(
               id =>
-                member.guild.members.cache.has(
-                  id
-                )
+                member.guild
+                  .members.cache
+                  .has(id)
             ).length;
 
           await channel.send({
@@ -2228,7 +2507,8 @@ Has entrado a ―═★❯❯ RƐɗ KɪƝƓS ♦ .! .
 ♟️ Una nueva pieza entra en la partida. 🃏`
                 )
                 .setThumbnail(
-                  member.user.displayAvatarURL()
+                  member.user
+                    .displayAvatarURL()
                 )
                 .setTimestamp()
             ]
@@ -2276,9 +2556,10 @@ client.on(
       d.inviteChannel
     ) {
       const channel =
-        member.guild.channels.cache.get(
-          d.inviteChannel
-        );
+        member.guild.channels
+          .cache.get(
+            d.inviteChannel
+          );
 
       if (
         channel?.isTextBased()
@@ -2286,9 +2567,9 @@ client.on(
         const currentMembers =
           stats.members.filter(
             id =>
-              member.guild.members.cache.has(
-                id
-              )
+              member.guild
+                .members.cache
+                .has(id)
           ).length;
 
         await channel.send({
@@ -2350,7 +2631,8 @@ client.on(
     saveData();
 
     const lower =
-      message.content.toLowerCase();
+      message.content
+        .toLowerCase();
 
     if (
       d.autoReplies?.[
@@ -2363,6 +2645,7 @@ client.on(
             d.autoReplies[
               lower
             ],
+
           allowedMentions: {
             parse: []
           }
@@ -2389,9 +2672,10 @@ client.on(
     }
 
     if (
-      !message.content.startsWith(
-        PREFIX
-      )
+      !message.content
+        .startsWith(
+          PREFIX
+        )
     ) {
       return;
     }
@@ -2444,10 +2728,10 @@ client.on(
       }
 
       if (
-        !GEMINI_API_KEY
+        !OPENROUTER_API_KEY
       ) {
         return reply(
-          "❌ La IA todavía no está configurada. Falta la variable `GEMINI_API_KEY`."
+          "❌ La IA todavía no está configurada. Falta la variable `OPENROUTER_API_KEY`."
         );
       }
 
@@ -2458,7 +2742,8 @@ client.on(
         const answer =
           await askFusakeAI(
             message.author.id,
-            message.author.username,
+            message.author
+              .username,
             question
           );
 
@@ -2468,6 +2753,7 @@ client.on(
         ) {
           return reply({
             content: answer,
+
             allowedMentions: {
               parse: []
             }
@@ -2485,6 +2771,7 @@ client.on(
         if (first) {
           await reply({
             content: first,
+
             allowedMentions: {
               parse: []
             }
@@ -2495,12 +2782,14 @@ client.on(
           const chunk of
             chunks
         ) {
-          await message.channel.send({
-            content: chunk,
-            allowedMentions: {
-              parse: []
-            }
-          });
+          await message.channel
+            .send({
+              content: chunk,
+
+              allowedMentions: {
+                parse: []
+              }
+            });
         }
 
         return;
@@ -2512,10 +2801,10 @@ client.on(
 
         if (
           error.message ===
-          "NO_GEMINI_KEY"
+          "NO_OPENROUTER_KEY"
         ) {
           return reply(
-            "❌ Falta configurar `GEMINI_API_KEY`."
+            "❌ Falta configurar `OPENROUTER_API_KEY`."
           );
         }
 
@@ -2693,9 +2982,9 @@ A partir de ahora **b!n** solamente funcionará en ${channel}.`
       const inside =
         stats.members.filter(
           id =>
-            message.guild.members.cache.has(
-              id
-            )
+            message.guild
+              .members.cache
+              .has(id)
         );
 
       const list =
@@ -2709,9 +2998,7 @@ A partir de ahora **b!n** solamente funcionará en ${channel}.`
                 (id, i) =>
                   `${i + 1}. <@${id}>`
               )
-              .join(
-                "\n"
-              )
+              .join("\n")
           : "Ninguno registrado.";
 
       return reply({
@@ -2724,7 +3011,8 @@ A partir de ahora **b!n** solamente funcionará en ${channel}.`
               `🔗🃏 Invitaciones de ${member.user.username}`
             )
             .setThumbnail(
-              member.user.displayAvatarURL()
+              member.user
+                .displayAvatarURL()
             )
             .addFields(
               {
@@ -2803,7 +3091,7 @@ A partir de ahora **b!n** solamente funcionará en ${channel}.`
 
     if (
       cmd ===
-      "clearautorole"
+        "clearautorole"
     ) {
       d.autoRole = null;
 
@@ -2850,7 +3138,8 @@ A partir de ahora **b!n** solamente funcionará en ${channel}.`
     if (
       cmd === "clearlogs"
     ) {
-      d.logsChannel = null;
+      d.logsChannel =
+        null;
 
       saveData();
 
@@ -2981,7 +3270,7 @@ A partir de ahora **b!n** solamente funcionará en ${channel}.`
 
     if (
       cmd ===
-      "resetconfig"
+        "resetconfig"
     ) {
       data[
         message.guild.id
@@ -3050,7 +3339,8 @@ A partir de ahora **b!n** solamente funcionará en ${channel}.`
           : "autoReactions";
 
       const trigger =
-        args[0]?.toLowerCase();
+        args[0]
+          ?.toLowerCase();
 
       if (!trigger) {
         return reply(
@@ -3073,98 +3363,135 @@ A partir de ahora **b!n** solamente funcionará en ${channel}.`
 // FIN PARTE 1/2
 // PEGA LA PARTE 2 JUSTO DEBAJO DE ESTA LÍNEA
 // NO CIERRES messageCreate TODAVÍA
-// ====================================================
+// ======================================================
     // ==================================================
     // MODERACIÓN
     // ==================================================
 
-    if (cmd === "ban" || cmd === "kick") {
-      const member = mentionedMember(message);
+    if (cmd === "ban") {
+      const member =
+        mentionedMember(message);
 
       if (!member) {
-        return reply(`❌ Usa **b!${cmd} @usuario [razón]**`);
+        return reply(
+          "❌ Menciona al usuario que quieres banear."
+        );
+      }
+
+      if (!member.bannable) {
+        return reply(
+          "❌ No puedo banear a ese usuario."
+        );
       }
 
       const reason =
         args.slice(1).join(" ") ||
-        "Sin razón especificada";
+        "Sin razón especificada.";
 
-      try {
-        if (cmd === "ban") {
-          if (!member.bannable) {
-            return reply(
-              "❌ No puedo banear a ese usuario. Revisa la jerarquía de roles."
-            );
-          }
+      await member.ban({
+        reason
+      });
 
-          await member.ban({ reason });
-        } else {
-          if (!member.kickable) {
-            return reply(
-              "❌ No puedo expulsar a ese usuario. Revisa la jerarquía de roles."
-            );
-          }
+      await sendLog(
+        message.guild,
+        "Usuario baneado",
+        `👤 Usuario: **${member.user.tag}**
+🆔 ID: \`${member.id}\`
+👑 Moderador: ${message.author}
+📝 Razón: ${reason}`,
+        0xe74c3c
+      );
 
-          await member.kick(reason);
-        }
-
-        await sendLog(
-          message.guild,
-          cmd === "ban"
-            ? "USUARIO BANEADO"
-            : "USUARIO EXPULSADO",
-          `**Usuario:** ${member.user.tag}
-**Moderador:** ${message.author.tag}
-**Razón:** ${reason}`,
-          0xe74c3c
-        );
-
-        return reply(
-          `${cmd === "ban" ? "🔨" : "🚪"} **${member.user.tag}**
-📝 Razón: **${reason}**`
-        );
-      } catch (error) {
-        return reply(
-          `❌ No pude realizar la acción: ${error.message}`
-        );
-      }
+      return reply(
+        `🔨 **${member.user.tag}** fue baneado.`
+      );
     }
 
     if (cmd === "unban") {
-      const id = args[0];
+      const userId =
+        args[0];
 
-      if (!id) {
-        return reply("❌ Usa **b!unban ID**");
+      if (!userId) {
+        return reply(
+          "❌ Usa **b!unban ID**"
+        );
       }
 
       try {
-        const user = await message.guild.members.unban(
-          id,
-          `Desbaneado por ${message.author.tag}`
-        );
+        const user =
+          await message.guild.members.unban(
+            userId
+          );
 
         await sendLog(
           message.guild,
-          "USUARIO DESBANEADO",
-          `**Usuario:** ${user.tag}
-**Por:** ${message.author.tag}`,
+          "Usuario desbaneado",
+          `👤 Usuario: **${user.tag}**
+🆔 ID: \`${user.id}\`
+👑 Moderador: ${message.author}`,
           0x2ecc71
         );
 
-        return reply(`🔓♟️ **${user.tag}** fue desbaneado.`);
+        return reply(
+          `✅ **${user.tag}** fue desbaneado.`
+        );
       } catch {
         return reply(
-          "❌ No pude desbanear ese ID. Comprueba que esté baneado."
+          "❌ No pude desbanear ese ID."
         );
       }
     }
 
-    if (cmd === "softban") {
-      const member = mentionedMember(message);
+    if (cmd === "kick") {
+      const member =
+        mentionedMember(message);
 
       if (!member) {
         return reply(
-          "❌ Usa **b!softban @usuario [razón]**"
+          "❌ Menciona al usuario."
+        );
+      }
+
+      if (!member.kickable) {
+        return reply(
+          "❌ No puedo expulsar a ese usuario."
+        );
+      }
+
+      const reason =
+        args.slice(1).join(" ") ||
+        "Sin razón especificada.";
+
+      const tag =
+        member.user.tag;
+
+      const id =
+        member.id;
+
+      await member.kick(reason);
+
+      await sendLog(
+        message.guild,
+        "Usuario expulsado",
+        `👤 Usuario: **${tag}**
+🆔 ID: \`${id}\`
+👑 Moderador: ${message.author}
+📝 Razón: ${reason}`,
+        0xe67e22
+      );
+
+      return reply(
+        `👢 **${tag}** fue expulsado.`
+      );
+    }
+
+    if (cmd === "softban") {
+      const member =
+        mentionedMember(message);
+
+      if (!member) {
+        return reply(
+          "❌ Menciona al usuario."
         );
       }
 
@@ -3176,270 +3503,442 @@ A partir de ahora **b!n** solamente funcionará en ${channel}.`
 
       const reason =
         args.slice(1).join(" ") ||
-        "Sin razón especificada";
+        "Sin razón especificada.";
 
-      try {
-        await member.ban({
-          reason,
-          deleteMessageSeconds: 86400
-        });
+      const userId =
+        member.id;
 
-        await message.guild.members.unban(member.id);
+      const tag =
+        member.user.tag;
 
-        await sendLog(
-          message.guild,
-          "SOFTBAN",
-          `**Usuario:** ${member.user.tag}
-**Por:** ${message.author.tag}
-**Razón:** ${reason}`
-        );
+      await member.ban({
+        deleteMessageSeconds:
+          60 * 60 * 24,
+        reason
+      });
 
-        return reply(
-          `♟️🃏 Softban aplicado a **${member.user.tag}**.`
-        );
-      } catch {
-        return reply("❌ No pude aplicar el softban.");
-      }
+      await message.guild.members
+        .unban(userId)
+        .catch(() => {});
+
+      await sendLog(
+        message.guild,
+        "Softban aplicado",
+        `👤 Usuario: **${tag}**
+🆔 ID: \`${userId}\`
+👑 Moderador: ${message.author}
+📝 Razón: ${reason}`,
+        0xe67e22
+      );
+
+      return reply(
+        `🧹 Softban aplicado a **${tag}**.`
+      );
     }
 
-    if (cmd === "timeout" || cmd === "untimeout") {
-      const member = mentionedMember(message);
+    if (cmd === "timeout") {
+      const member =
+        mentionedMember(message);
 
-      if (!member) {
-        return reply("❌ Debes mencionar un usuario.");
+      const minutes =
+        Number(args[1]);
+
+      if (
+        !member ||
+        !Number.isFinite(minutes) ||
+        minutes <= 0
+      ) {
+        return reply(
+          "❌ Usa **b!timeout @usuario minutos**"
+        );
       }
 
       if (!member.moderatable) {
-        return reply("❌ No puedo moderar a ese usuario.");
-      }
-
-      try {
-        if (cmd === "untimeout") {
-          await member.timeout(
-            null,
-            `Retirado por ${message.author.tag}`
-          );
-
-          return reply(
-            `🃏 Timeout retirado a **${member.user.tag}**.`
-          );
-        }
-
-        const minutes = Number(args[1]);
-
-        if (
-          !Number.isFinite(minutes) ||
-          minutes < 1 ||
-          minutes > 40320
-        ) {
-          return reply(
-            "❌ Indica entre **1 y 40320 minutos**."
-          );
-        }
-
-        await member.timeout(
-          minutes * 60000,
-          `Aplicado por ${message.author.tag}`
-        );
-
-        await sendLog(
-          message.guild,
-          "TIMEOUT",
-          `**Usuario:** ${member.user.tag}
-**Duración:** ${minutes} minutos
-**Por:** ${message.author.tag}`
-        );
-
         return reply(
-          `⏳ **${member.user.tag}** recibió timeout de **${minutes} minutos**.`
+          "❌ No puedo aplicar timeout a ese usuario."
         );
-      } catch {
-        return reply("❌ No pude modificar el timeout.");
       }
+
+      const ms =
+        Math.min(
+          minutes * 60000,
+          28 * 24 * 60 * 60 * 1000
+        );
+
+      await member.timeout(
+        ms,
+        `Aplicado por ${message.author.tag}`
+      );
+
+      await sendLog(
+        message.guild,
+        "Timeout aplicado",
+        `👤 Usuario: ${member}
+⏱️ Duración: **${duration(ms)}**
+👑 Moderador: ${message.author}`,
+        0xf39c12
+      );
+
+      return reply(
+        `⏱️ Timeout aplicado a ${member} durante **${duration(ms)}**.`
+      );
+    }
+
+    if (cmd === "untimeout") {
+      const member =
+        mentionedMember(message);
+
+      if (!member) {
+        return reply(
+          "❌ Usa **b!untimeout @usuario**"
+        );
+      }
+
+      if (!member.moderatable) {
+        return reply(
+          "❌ No puedo modificar a ese usuario."
+        );
+      }
+
+      await member.timeout(null);
+
+      await sendLog(
+        message.guild,
+        "Timeout retirado",
+        `👤 Usuario: ${member}
+👑 Moderador: ${message.author}`,
+        0x2ecc71
+      );
+
+      return reply(
+        `✅ Timeout retirado a ${member}.`
+      );
+    }
+
+    if (cmd === "warn") {
+      const member =
+        mentionedMember(message);
+
+      if (!member) {
+        return reply(
+          "❌ Usa **b!warn @usuario razón**"
+        );
+      }
+
+      const reason =
+        args.slice(1).join(" ") ||
+        "Sin razón especificada.";
+
+      if (
+        !d.warnings[
+          member.id
+        ]
+      ) {
+        d.warnings[
+          member.id
+        ] = [];
+      }
+
+      d.warnings[
+        member.id
+      ].push({
+        reason,
+        moderator:
+          message.author.id,
+        date: Date.now()
+      });
+
+      saveData();
+
+      await sendLog(
+        message.guild,
+        "Advertencia",
+        `👤 Usuario: ${member}
+👑 Moderador: ${message.author}
+📝 Razón: ${reason}`,
+        0xf1c40f
+      );
+
+      return reply(
+        `⚠️ ${member} recibió una advertencia.\nTotal: **${d.warnings[member.id].length}**`
+      );
+    }
+
+    if (cmd === "warnings") {
+      const member =
+        mentionedMember(message);
+
+      if (!member) {
+        return reply(
+          "❌ Usa **b!warnings @usuario**"
+        );
+      }
+
+      const warnings =
+        d.warnings[
+          member.id
+        ] || [];
+
+      if (!warnings.length) {
+        return reply(
+          `✅ ${member} no tiene advertencias.`
+        );
+      }
+
+      const list =
+        warnings
+          .slice(-10)
+          .map(
+            (warning, index) =>
+              `**${index + 1}.** ${warning.reason}\n👑 <@${warning.moderator}> • <t:${Math.floor(warning.date / 1000)}:R>`
+          )
+          .join("\n\n");
+
+      return reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(
+              0xf1c40f
+            )
+            .setTitle(
+              `⚠️ Advertencias de ${member.user.username}`
+            )
+            .setDescription(
+              list
+            )
+            .setFooter({
+              text:
+                `Total: ${warnings.length}`
+            })
+        ]
+      });
     }
 
     if (
-      cmd === "warn" ||
-      cmd === "warnings" ||
-      cmd === "clearwarnings"
+      cmd ===
+      "clearwarnings"
     ) {
-      const member = mentionedMember(message);
+      const member =
+        mentionedMember(message);
 
       if (!member) {
-        return reply("❌ Debes mencionar un usuario.");
-      }
-
-      if (cmd === "warn") {
-        d.warnings[member.id] ??= [];
-
-        const reason =
-          args.slice(1).join(" ") ||
-          "Sin razón especificada";
-
-        d.warnings[member.id].push({
-          reason,
-          moderator: message.author.tag,
-          date: new Date().toISOString()
-        });
-
-        saveData();
-
-        await sendLog(
-          message.guild,
-          "ADVERTENCIA",
-          `**Usuario:** ${member.user.tag}
-**Moderador:** ${message.author.tag}
-**Razón:** ${reason}`
-        );
-
         return reply(
-          `⚠️ **${member.user.tag}** recibió una advertencia.`
+          "❌ Usa **b!clearwarnings @usuario**"
         );
       }
 
-      if (cmd === "clearwarnings") {
-        delete d.warnings[member.id];
+      d.warnings[
+        member.id
+      ] = [];
 
-        saveData();
-
-        return reply(
-          `🧹 Advertencias eliminadas de **${member.user.tag}**.`
-        );
-      }
-
-      const warnings = d.warnings[member.id];
+      saveData();
 
       return reply(
-        warnings?.length
-          ? warnings
-              .map(
-                (warning, index) =>
-                  `**${index + 1}.** ${warning.reason} — ${warning.moderator}`
-              )
-              .join("\n")
-          : `✅ **${member.user.tag}** no tiene advertencias.`
+        `🧹 Advertencias de ${member} eliminadas.`
       );
     }
 
     if (
       cmd === "purge" ||
-      cmd === "clear" ||
-      cmd === "clearchannel"
+      cmd === "clear"
     ) {
-      const n =
-        Number(args[0]) ||
-        (cmd === "clearchannel" ? 50 : 0);
+      const amount =
+        Number(args[0]);
 
-      if (n < 1 || n > 100) {
+      if (
+        !Number.isInteger(
+          amount
+        ) ||
+        amount < 1 ||
+        amount > 100
+      ) {
         return reply(
-          "❌ Usa una cantidad entre **1 y 100**."
+          "❌ Indica una cantidad entre **1 y 100**."
         );
       }
 
       try {
         const deleted =
-          await message.channel.bulkDelete(n, true);
+          await message.channel.bulkDelete(
+            amount,
+            true
+          );
 
-        return message.channel.send(
-          `♟️🧹 Se limpiaron **${deleted.size} mensajes**.`
+        const msg =
+          await message.channel.send(
+            `🧹 Eliminados **${deleted.size}** mensajes.`
+          );
+
+        setTimeout(
+          () =>
+            msg.delete()
+              .catch(() => {}),
+          3000
         );
       } catch {
-        return reply("❌ No pude limpiar el canal.");
+        return reply(
+          "❌ No pude eliminar esos mensajes."
+        );
       }
+
+      return;
     }
 
-    if (cmd === "lock" || cmd === "unlock") {
-      try {
-        await message.channel.permissionOverwrites.edit(
-          message.guild.roles.everyone,
+    if (cmd === "slowmode") {
+      const seconds =
+        Number(args[0]);
+
+      if (
+        !Number.isInteger(
+          seconds
+        ) ||
+        seconds < 0 ||
+        seconds > 21600
+      ) {
+        return reply(
+          "❌ Usa **b!slowmode segundos** entre 0 y 21600."
+        );
+      }
+
+      if (
+        typeof message.channel
+          .setRateLimitPerUser !==
+        "function"
+      ) {
+        return reply(
+          "❌ Este canal no admite modo lento."
+        );
+      }
+
+      await message.channel
+        .setRateLimitPerUser(
+          seconds
+        );
+
+      return reply(
+        seconds
+          ? `🐢 Modo lento: **${seconds}s**.`
+          : "⚡ Modo lento desactivado."
+      );
+    }
+
+    if (cmd === "lock") {
+      await message.channel
+        .permissionOverwrites
+        .edit(
+          message.guild.roles
+            .everyone,
           {
             SendMessages:
-              cmd === "lock"
-                ? false
-                : null
+              false
           }
         );
 
-        return reply(
-          cmd === "lock"
-            ? "🔒♟️ Canal bloqueado."
-            : "🔓🃏 Canal desbloqueado."
-        );
-      } catch {
-        return reply(
-          "❌ No pude cambiar los permisos del canal."
-        );
-      }
+      return reply(
+        "🔒 Canal bloqueado."
+      );
     }
 
-    if (cmd === "lockall" || cmd === "unlockall") {
+    if (cmd === "unlock") {
+      await message.channel
+        .permissionOverwrites
+        .edit(
+          message.guild.roles
+            .everyone,
+          {
+            SendMessages:
+              null
+          }
+        );
+
+      return reply(
+        "🔓 Canal desbloqueado."
+      );
+    }
+
+    if (cmd === "lockall") {
       let changed = 0;
 
       for (
-        const c of message.guild.channels.cache.values()
+        const channel of
+          message.guild.channels
+            .cache.values()
       ) {
         if (
-          c.type !== ChannelType.GuildText &&
-          c.type !== ChannelType.GuildAnnouncement
+          channel.type !==
+          ChannelType.GuildText
         ) {
           continue;
         }
 
         try {
-          await c.permissionOverwrites.edit(
-            message.guild.roles.everyone,
-            {
-              SendMessages:
-                cmd === "lockall"
-                  ? false
-                  : null
-            }
-          );
+          await channel
+            .permissionOverwrites
+            .edit(
+              message.guild.roles
+                .everyone,
+              {
+                SendMessages:
+                  false
+              }
+            );
 
           changed++;
         } catch {}
       }
 
       return reply(
-        `${
-          cmd === "lockall"
-            ? "🔒♟️"
-            : "🔓🃏"
-        } Se actualizaron **${changed} canales**.`
+        `🔒 Bloqueados **${changed}** canales.`
       );
     }
 
-    if (cmd === "slowmode") {
-      const n = Number(args[0]);
+    if (cmd === "unlockall") {
+      let changed = 0;
 
-      if (
-        Number.isNaN(n) ||
-        n < 0 ||
-        n > 21600
+      for (
+        const channel of
+          message.guild.channels
+            .cache.values()
       ) {
-        return reply(
-          "❌ Usa un valor entre **0 y 21600 segundos**."
-        );
+        if (
+          channel.type !==
+          ChannelType.GuildText
+        ) {
+          continue;
+        }
+
+        try {
+          await channel
+            .permissionOverwrites
+            .edit(
+              message.guild.roles
+                .everyone,
+              {
+                SendMessages:
+                  null
+              }
+            );
+
+          changed++;
+        } catch {}
       }
 
-      try {
-        await message.channel.setRateLimitPerUser(n);
-
-        return reply(
-          `🐌 Slowmode establecido en **${n} segundos**.`
-        );
-      } catch {
-        return reply(
-          "❌ No pude modificar el slowmode."
-        );
-      }
+      return reply(
+        `🔓 Desbloqueados **${changed}** canales.`
+      );
     }
 
     if (cmd === "nick") {
-      const member = mentionedMember(message);
-      const name = args.slice(1).join(" ");
+      const member =
+        mentionedMember(message);
 
-      if (!member || !name) {
+      const nickname =
+        args.slice(1).join(" ");
+
+      if (
+        !member ||
+        !nickname
+      ) {
         return reply(
           "❌ Usa **b!nick @usuario nuevo nombre**"
         );
@@ -3451,175 +3950,416 @@ A partir de ahora **b!n** solamente funcionará en ${channel}.`
         );
       }
 
-      try {
-        await member.setNickname(name);
-
-        return reply(
-          `✏️ Apodo actualizado a **${name}**.`
+      await member
+        .setNickname(
+          nickname
         );
-      } catch {
-        return reply("❌ No pude cambiar el apodo.");
-      }
+
+      return reply(
+        `✏️ Apodo de ${member} actualizado.`
+      );
     }
 
     if (cmd === "dehoist") {
       let changed = 0;
 
-      const members =
-        message.guild.members.cache.filter(member =>
-          /^[^a-zA-Z0-9áéíóúÁÉÍÓÚ]/.test(
-            member.displayName
-          )
-        );
-
-      for (const member of members.values()) {
-        if (!member.manageable) continue;
-
-        const newName =
-          member.displayName.replace(
-            /^[^a-zA-Z0-9áéíóúÁÉÍÓÚ]+/,
-            ""
-          );
-
-        if (!newName) continue;
-
-        try {
-          await member.setNickname(newName);
-          changed++;
-        } catch {}
-      }
-
-      return reply(
-        `✏️ Se corrigieron **${changed} nombres**.`
-      );
-    }
-
-    if (
-      cmd === "roleall" ||
-      cmd === "removeroleall"
-    ) {
-      const r = mentionedRole(message);
-
-      if (
-        !r ||
-        r.position >=
-          message.guild.members.me.roles.highest.position
-      ) {
-        return reply(
-          "❌ Rol inválido o superior al rol de Fusake."
-        );
-      }
-
-      let changed = 0;
+      const symbols =
+        /^[!#$%&()*+\-./:;<=>?@[\\\]^_`{|}~]+/;
 
       for (
         const member of
-          message.guild.members.cache.values()
+          message.guild.members
+            .cache.values()
       ) {
-        try {
-          if (
-            cmd === "roleall" &&
-            !member.user.bot &&
-            !member.roles.cache.has(r.id)
-          ) {
-            await member.roles.add(r);
-            changed++;
-          }
+        if (
+          !member.manageable
+        ) {
+          continue;
+        }
 
-          if (
-            cmd === "removeroleall" &&
-            member.roles.cache.has(r.id)
-          ) {
-            await member.roles.remove(r);
+        const name =
+          member.displayName;
+
+        if (
+          symbols.test(name)
+        ) {
+          try {
+            await member
+              .setNickname(
+                `z-${name}`.slice(
+                  0,
+                  32
+                )
+              );
+
             changed++;
-          }
-        } catch {}
+          } catch {}
+        }
       }
 
       return reply(
-        `♟️🃏 Se modificó el rol en **${changed} usuarios**.`
+        `🧹 Dehoist completado. Modificados: **${changed}**.`
       );
     }
 
-    // ==================================================
-    // INFORMACIÓN
-    // ==================================================
-
-    if (
-      cmd === "checkmember" ||
-      cmd === "userinfo"
-    ) {
+    if (cmd === "checkmember") {
       const member =
-        mentionedMember(message) ||
-        message.member;
+        mentionedMember(message);
+
+      if (!member) {
+        return reply(
+          "❌ Usa **b!checkmember @usuario**"
+        );
+      }
 
       return reply({
         embeds: [
           new EmbedBuilder()
-            .setColor(0x3498db)
-            .setTitle(`♟️🃏 ${member.user.tag}`)
+            .setColor(
+              0x3498db
+            )
+            .setTitle(
+              `🔎 ${member.user.tag}`
+            )
             .setThumbnail(
-              member.user.displayAvatarURL()
+              member.user
+                .displayAvatarURL()
             )
             .addFields(
               {
-                name: "🆔 ID",
-                value: member.id,
-                inline: true
-              },
-              {
-                name: "🟢 Estado",
+                name: "ID",
                 value:
-                  member.presence?.status ||
-                  "offline",
-                inline: true
+                  member.id
               },
               {
-                name: "📅 Cuenta creada",
-                value: `<t:${Math.floor(
-                  member.user.createdTimestamp / 1000
-                )}:F>`
-              },
-              {
-                name: "🏠 Entró al servidor",
-                value: member.joinedTimestamp
-                  ? `<t:${Math.floor(
-                      member.joinedTimestamp / 1000
-                    )}:F>`
-                  : "Desconocido"
-              },
-              {
-                name: "🎭 Roles",
+                name:
+                  "Cuenta creada",
                 value:
-                  member.roles.cache
-                    .filter(
-                      role =>
-                        role.id !== message.guild.id
-                    )
-                    .map(String)
-                    .join(", ")
-                    .slice(0, 1000) ||
-                  "Ninguno"
+                  `<t:${Math.floor(member.user.createdTimestamp / 1000)}:F>`
+              },
+              {
+                name:
+                  "Entró al servidor",
+                value:
+                  member.joinedTimestamp
+                    ? `<t:${Math.floor(member.joinedTimestamp / 1000)}:F>`
+                    : "Desconocido"
+              },
+              {
+                name: "Bot",
+                value:
+                  member.user.bot
+                    ? "Sí"
+                    : "No"
               }
             )
         ]
       });
     }
 
+    // ==================================================
+    // INFORMACIÓN DEL SERVIDOR
+    // ==================================================
+
     if (cmd === "serverinfo") {
+      const guild =
+        message.guild;
+
       return reply({
         embeds: [
           new EmbedBuilder()
-            .setColor(0x3498db)
-            .setTitle(`♟️🃏 ${message.guild.name}`)
-            .setThumbnail(message.guild.iconURL())
+            .setColor(
+              0xf1c40f
+            )
+            .setTitle(
+              `♟️🃏 ${guild.name}`
+            )
+            .setThumbnail(
+              guild.iconURL()
+            )
+            .addFields(
+              {
+                name:
+                  "👑 Dueño",
+                value:
+                  `<@${guild.ownerId}>`,
+                inline:
+                  true
+              },
+              {
+                name:
+                  "👥 Miembros",
+                value:
+                  `${guild.memberCount}`,
+                inline:
+                  true
+              },
+              {
+                name:
+                  "🎭 Roles",
+                value:
+                  `${guild.roles.cache.size}`,
+                inline:
+                  true
+              },
+              {
+                name:
+                  "📺 Canales",
+                value:
+                  `${guild.channels.cache.size}`,
+                inline:
+                  true
+              },
+              {
+                name:
+                  "😀 Emojis",
+                value:
+                  `${guild.emojis.cache.size}`,
+                inline:
+                  true
+              },
+              {
+                name:
+                  "🚀 Boosts",
+                value:
+                  `${guild.premiumSubscriptionCount || 0}`,
+                inline:
+                  true
+              },
+              {
+                name:
+                  "📅 Creado",
+                value:
+                  `<t:${Math.floor(guild.createdTimestamp / 1000)}:F>`
+              }
+            )
+            .setTimestamp()
+        ]
+      });
+    }
+
+    if (cmd === "userinfo") {
+      const member =
+        mentionedMember(message) ||
+        message.member;
+
+      const roles =
+        member.roles.cache
+          .filter(
+            role =>
+              role.id !==
+              message.guild.id
+          )
+          .sort(
+            (a, b) =>
+              b.position -
+              a.position
+          )
+          .map(
+            role =>
+              role.toString()
+          )
+          .slice(0, 20)
+          .join(" ") ||
+        "Ninguno";
+
+      return reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(
+              member.displayColor ||
+                0x3498db
+            )
+            .setTitle(
+              `👤 ${member.user.tag}`
+            )
+            .setThumbnail(
+              member.user
+                .displayAvatarURL()
+            )
+            .addFields(
+              {
+                name: "🆔 ID",
+                value:
+                  member.id
+              },
+              {
+                name:
+                  "📅 Cuenta creada",
+                value:
+                  `<t:${Math.floor(member.user.createdTimestamp / 1000)}:F>`
+              },
+              {
+                name:
+                  "🏠 Entró al servidor",
+                value:
+                  member.joinedTimestamp
+                    ? `<t:${Math.floor(member.joinedTimestamp / 1000)}:F>`
+                    : "Desconocido"
+              },
+              {
+                name:
+                  "🎭 Roles",
+                value:
+                  roles.slice(
+                    0,
+                    1024
+                  )
+              }
+            )
+        ]
+      });
+    }
+
+    if (cmd === "roleinfo") {
+      const role =
+        mentionedRole(message);
+
+      if (!role) {
+        return reply(
+          "❌ Usa **b!roleinfo @rol**"
+        );
+      }
+
+      return reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(
+              role.color ||
+                0x3498db
+            )
+            .setTitle(
+              `🎭 ${role.name}`
+            )
+            .addFields(
+              {
+                name: "ID",
+                value:
+                  role.id
+              },
+              {
+                name:
+                  "Miembros",
+                value:
+                  `${role.members.size}`,
+                inline:
+                  true
+              },
+              {
+                name:
+                  "Posición",
+                value:
+                  `${role.position}`,
+                inline:
+                  true
+              },
+              {
+                name:
+                  "Mencionable",
+                value:
+                  role.mentionable
+                    ? "Sí"
+                    : "No",
+                inline:
+                  true
+              },
+              {
+                name:
+                  "Administrado",
+                value:
+                  role.managed
+                    ? "Sí"
+                    : "No",
+                inline:
+                  true
+              }
+            )
+        ]
+      });
+    }
+
+    if (cmd === "channelinfo") {
+      const channel =
+        mentionedChannel(
+          message
+        ) ||
+        message.channel;
+
+      return reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(
+              0x3498db
+            )
+            .setTitle(
+              `📺 ${channel.name}`
+            )
+            .addFields(
+              {
+                name: "ID",
+                value:
+                  channel.id
+              },
+              {
+                name: "Tipo",
+                value:
+                  `${channel.type}`,
+                inline:
+                  true
+              },
+              {
+                name:
+                  "Categoría",
+                value:
+                  channel.parent
+                    ? channel.parent.name
+                    : "Ninguna",
+                inline:
+                  true
+              },
+              {
+                name:
+                  "Creado",
+                value:
+                  `<t:${Math.floor(channel.createdTimestamp / 1000)}:F>`
+              }
+            )
+        ]
+      });
+    }
+
+    if (cmd === "roles") {
+      const roles =
+        message.guild.roles.cache
+          .filter(
+            role =>
+              role.id !==
+              message.guild.id
+          )
+          .sort(
+            (a, b) =>
+              b.position -
+              a.position
+          )
+          .map(
+            role =>
+              role.toString()
+          )
+          .slice(0, 50)
+          .join("\n");
+
+      return reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(
+              0x3498db
+            )
+            .setTitle(
+              "🎭 Roles"
+            )
             .setDescription(
-              `👑 Dueño: <@${message.guild.ownerId}>
-👥 Miembros: ${message.guild.memberCount}
-💬 Canales: ${message.guild.channels.cache.size}
-🎭 Roles: ${message.guild.roles.cache.size}
-😀 Emojis: ${message.guild.emojis.cache.size}
-🚀 Boosts: ${message.guild.premiumSubscriptionCount || 0}`
+              roles ||
+                "No hay roles."
             )
         ]
       });
@@ -3634,179 +4374,86 @@ A partir de ahora **b!n** solamente funcionará en ${channel}.`
       );
     }
 
-    if (cmd === "bots" || cmd === "humans") {
-      const count =
-        message.guild.members.cache.filter(member =>
-          cmd === "bots"
-            ? member.user.bot
-            : !member.user.bot
-        ).size;
+    if (cmd === "bots") {
+      const bots =
+        message.guild.members.cache
+          .filter(
+            member =>
+              member.user.bot
+          ).size;
 
       return reply(
-        `${
-          cmd === "bots"
-            ? "🤖 Bots"
-            : "♟️ Jugadores humanos"
-        }: **${count}**`
+        `🤖 Bots: **${bots}**`
+      );
+    }
+
+    if (cmd === "humans") {
+      const humans =
+        message.guild.members.cache
+          .filter(
+            member =>
+              !member.user.bot
+          ).size;
+
+      return reply(
+        `👤 Humanos: **${humans}**`
       );
     }
 
     if (cmd === "emojis") {
+      const emojis =
+        message.guild.emojis.cache
+          .map(
+            emoji =>
+              emoji.toString()
+          )
+          .slice(0, 100)
+          .join(" ");
+
       return reply(
-        `😀 Emojis: **${message.guild.emojis.cache.size}**`
+        emojis ||
+          "😀 El servidor no tiene emojis personalizados."
       );
     }
 
     if (cmd === "boosts") {
       return reply(
-        `🚀 Boosts: **${message.guild.premiumSubscriptionCount || 0}**`
+        `🚀 Boosts: **${message.guild.premiumSubscriptionCount || 0}**\n💎 Nivel: **${message.guild.premiumTier}**`
       );
-    }
-
-    if (cmd === "rolecount") {
-      return reply(
-        `🎭 Roles: **${message.guild.roles.cache.size - 1}**`
-      );
-    }
-
-    if (cmd === "categorycount") {
-      return reply(
-        `📂 Categorías: **${
-          message.guild.channels.cache.filter(
-            c => c.type === ChannelType.GuildCategory
-          ).size
-        }**`
-      );
-    }
-
-    if (cmd === "channelcount") {
-      return reply(
-        `♟️ Texto: **${
-          message.guild.channels.cache.filter(
-            c => c.type === ChannelType.GuildText
-          ).size
-        }**
-🃏 Voz: **${
-          message.guild.channels.cache.filter(
-            c => c.type === ChannelType.GuildVoice
-          ).size
-        }**`
-      );
-    }
-
-    if (cmd === "memberlist") {
-      const members =
-        message.guild.members.cache
-          .filter(member => !member.user.bot)
-          .first(30)
-          .map(member => `♟️ ${member}`)
-          .join("\n");
-
-      return reply({
-        embeds: [
-          new EmbedBuilder()
-            .setColor(0xf1c40f)
-            .setTitle("♟️🃏 Jugadores de la mesa")
-            .setDescription(
-              members ||
-                "No hay miembros disponibles."
-            )
-        ]
-      });
-    }
-
-    if (cmd === "roles") {
-      const roles =
-        message.guild.roles.cache
-          .filter(
-            role =>
-              role.id !== message.guild.id
-          )
-          .map(role => role.toString())
-          .slice(0, 50)
-          .join("\n");
-
-      return reply(
-        roles || "No hay roles."
-      );
-    }
-
-    if (cmd === "roleinfo") {
-      const r = mentionedRole(message);
-
-      if (!r) {
-        return reply(
-          "❌ Usa **b!roleinfo @rol**"
-        );
-      }
-
-      return reply(
-        `🃏 **${r.name}**
-🆔 ${r.id}
-👥 ${r.members.size} miembros
-📌 Posición ${r.position}`
-      );
-    }
-
-    if (cmd === "channelinfo") {
-      const c =
-        mentionedChannel(message) ||
-        message.channel;
-
-      return reply(
-        `💬 **${c.name}**
-🆔 ${c.id}
-📂 Tipo: ${c.type}`
-      );
-    }
-
-    if (
-      cmd === "servericon" ||
-      cmd === "serverbanner"
-    ) {
-      const url =
-        cmd === "servericon"
-          ? message.guild.iconURL({
-              size: 1024
-            })
-          : message.guild.bannerURL({
-              size: 1024
-            });
-
-      if (!url) {
-        return reply("❌ No disponible.");
-      }
-
-      return reply({
-        embeds: [
-          new EmbedBuilder()
-            .setColor(0xf1c40f)
-            .setTitle(
-              cmd === "servericon"
-                ? "♟️ Icono del servidor"
-                : "🃏 Banner del servidor"
-            )
-            .setImage(url)
-        ]
-      });
     }
 
     if (cmd === "staff") {
       const staff =
         message.guild.members.cache
-          .filter(member =>
-            member.permissions.has(
-              PermissionFlagsBits.Administrator
-            )
+          .filter(
+            member =>
+              member.permissions.has(
+                PermissionFlagsBits.Administrator
+              ) &&
+              !member.user.bot
           )
-          .first(30)
-          .map(member => `👑 ${member}`)
+          .map(
+            member =>
+              member.toString()
+          )
+          .slice(0, 50)
           .join("\n");
 
-      return reply(
-        staff ||
-          "No se encontraron administradores."
-      );
+      return reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(
+              0xf1c40f
+            )
+            .setTitle(
+              "👑 Staff administrativo"
+            )
+            .setDescription(
+              staff ||
+                "No encontré administradores."
+            )
+        ]
+      });
     }
 
     if (cmd === "permissions") {
@@ -3814,16 +4461,27 @@ A partir de ahora **b!n** solamente funcionará en ${channel}.`
         mentionedMember(message) ||
         message.member;
 
-      const perms =
+      const permissions =
         member.permissions
           .toArray()
-          .map(p => `• ${p}`)
-          .join("\n")
-          .slice(0, 1900);
+          .slice(0, 50)
+          .join("\n");
 
-      return reply(
-        perms || "Sin permisos."
-      );
+      return reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(
+              0x3498db
+            )
+            .setTitle(
+              `🔐 Permisos de ${member.user.username}`
+            )
+            .setDescription(
+              permissions ||
+                "Ninguno"
+            )
+        ]
+      });
     }
 
     if (cmd === "avatar") {
@@ -3834,25 +4492,135 @@ A partir de ahora **b!n** solamente funcionará en ${channel}.`
       return reply({
         embeds: [
           new EmbedBuilder()
-            .setColor(0xf1c40f)
+            .setColor(
+              0x3498db
+            )
             .setTitle(
-              `🃏 Avatar de ${member.user.tag}`
+              `🖼️ Avatar de ${member.user.username}`
             )
             .setImage(
-              member.user.displayAvatarURL({
-                size: 1024
-              })
+              member.user
+                .displayAvatarURL({
+                  size: 1024
+                })
             )
+        ]
+      });
+    }
+
+    if (cmd === "servericon") {
+      const icon =
+        message.guild.iconURL({
+          size: 1024
+        });
+
+      if (!icon) {
+        return reply(
+          "❌ Este servidor no tiene icono."
+        );
+      }
+
+      return reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(
+              0x3498db
+            )
+            .setTitle(
+              "🖼️ Icono del servidor"
+            )
+            .setImage(icon)
+        ]
+      });
+    }
+
+    if (cmd === "serverbanner") {
+      const banner =
+        message.guild.bannerURL({
+          size: 1024
+        });
+
+      if (!banner) {
+        return reply(
+          "❌ Este servidor no tiene banner."
+        );
+      }
+
+      return reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(
+              0x3498db
+            )
+            .setTitle(
+              "🖼️ Banner del servidor"
+            )
+            .setImage(banner)
         ]
       });
     }
 
     if (cmd === "created") {
       return reply(
-        `📅 El servidor fue creado <t:${Math.floor(
-          message.guild.createdTimestamp / 1000
-        )}:F>.`
+        `📅 **${message.guild.name}** fue creado <t:${Math.floor(message.guild.createdTimestamp / 1000)}:F>.`
       );
+    }
+
+    if (cmd === "channelcount") {
+      return reply(
+        `📺 Canales: **${message.guild.channels.cache.size}**`
+      );
+    }
+
+    if (cmd === "categorycount") {
+      const count =
+        message.guild.channels.cache
+          .filter(
+            channel =>
+              channel.type ===
+              ChannelType.GuildCategory
+          ).size;
+
+      return reply(
+        `📁 Categorías: **${count}**`
+      );
+    }
+
+    if (cmd === "rolecount") {
+      return reply(
+        `🎭 Roles: **${message.guild.roles.cache.size - 1}**`
+      );
+    }
+
+    if (cmd === "memberlist") {
+      const list =
+        message.guild.members.cache
+          .filter(
+            member =>
+              !member.user.bot
+          )
+          .map(
+            member =>
+              `• ${member.user.tag}`
+          )
+          .slice(0, 50)
+          .join("\n");
+
+      return reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(
+              0x3498db
+            )
+            .setTitle(
+              "👥 Lista de miembros"
+            )
+            .setDescription(
+              list ||
+                "No encontré miembros."
+            )
+        ]
+      });
     }
 
     // ==================================================
@@ -3860,15 +4628,17 @@ A partir de ahora **b!n** solamente funcionará en ${channel}.`
     // ==================================================
 
     if (cmd === "say") {
-      const text = args.join(" ");
+      const text =
+        args.join(" ");
 
       if (!text) {
         return reply(
-          "❌ Usa **b!say mensaje**"
+          "❌ Escribe el mensaje."
         );
       }
 
-      await message.delete().catch(() => {});
+      await message.delete()
+        .catch(() => {});
 
       return message.channel.send({
         content: text,
@@ -3879,36 +4649,51 @@ A partir de ahora **b!n** solamente funcionará en ${channel}.`
     }
 
     if (cmd === "announce") {
-      const text = args.join(" ");
+      const text =
+        args.join(" ");
 
       if (!text) {
         return reply(
-          "❌ Usa **b!announce mensaje**"
+          "❌ Escribe el anuncio."
         );
       }
 
       return message.channel.send({
         embeds: [
           new EmbedBuilder()
-            .setColor(0xf1c40f)
-            .setTitle("♟️🃏 ANUNCIO")
-            .setDescription(text)
+            .setColor(
+              0xf1c40f
+            )
+            .setTitle(
+              "📢🃏 ANUNCIO ♟️"
+            )
+            .setDescription(
+              text
+            )
+            .setFooter({
+              text:
+                `Publicado por ${message.author.tag}`
+            })
             .setTimestamp()
         ]
       });
     }
 
     if (cmd === "embed") {
-      const colorInput = args.shift();
-      const color = parseColor(colorInput);
-      const text = args.join(" ");
+      const color =
+        parseColor(
+          args.shift()
+        );
+
+      const text =
+        args.join(" ");
 
       if (
         color === null ||
         !text
       ) {
         return reply(
-          "❌ Usa **b!embed #ff0000 mensaje**"
+          "❌ Usa **b!embed #COLOR mensaje**"
         );
       }
 
@@ -3916,13 +4701,17 @@ A partir de ahora **b!n** solamente funcionará en ${channel}.`
         embeds: [
           new EmbedBuilder()
             .setColor(color)
-            .setDescription(text)
+            .setDescription(
+              text
+            )
+            .setTimestamp()
         ]
       });
     }
 
     if (cmd === "poll") {
-      const question = args.join(" ");
+      const question =
+        args.join(" ");
 
       if (!question) {
         return reply(
@@ -3934,132 +4723,253 @@ A partir de ahora **b!n** solamente funcionará en ${channel}.`
         await message.channel.send({
           embeds: [
             new EmbedBuilder()
-              .setColor(0xf1c40f)
-              .setTitle("♟️🃏 Encuesta")
-              .setDescription(question)
+              .setColor(
+                0xf1c40f
+              )
+              .setTitle(
+                "📊 Encuesta"
+              )
+              .setDescription(
+                question
+              )
               .setFooter({
-                text: "👍 Sí • 👎 No"
+                text:
+                  `Por ${message.author.tag}`
               })
           ]
         });
 
-      await poll.react("👍").catch(() => {});
-      await poll.react("👎").catch(() => {});
+      await poll.react("👍");
+      await poll.react("👎");
 
       return;
     }
 
-    if (
-      cmd === "move" ||
-      cmd === "disconnect"
-    ) {
+    if (cmd === "move") {
+      const member =
+        mentionedMember(message);
+
+      const channel =
+        mentionedChannel(message);
+
+      if (
+        !member ||
+        !channel ||
+        !channel.isVoiceBased()
+      ) {
+        return reply(
+          "❌ Usa **b!move @usuario #canal-de-voz**"
+        );
+      }
+
+      if (
+        !member.voice.channel
+      ) {
+        return reply(
+          "❌ Ese usuario no está conectado a voz."
+        );
+      }
+
+      await member.voice
+        .setChannel(channel);
+
+      return reply(
+        `🔊 ${member} fue movido a ${channel}.`
+      );
+    }
+
+    if (cmd === "disconnect") {
       const member =
         mentionedMember(message);
 
       if (!member) {
         return reply(
-          "❌ Debes mencionar un usuario."
+          "❌ Usa **b!disconnect @usuario**"
         );
       }
 
-      try {
-        if (cmd === "move") {
-          const c =
-            mentionedChannel(message);
-
-          if (
-            !c ||
-            c.type !== ChannelType.GuildVoice
-          ) {
-            return reply(
-              "❌ Menciona un canal de voz."
-            );
-          }
-
-          await member.voice.setChannel(c);
-
-          return reply(
-            `🔊 **${member.user.tag}** fue movido a ${c}.`
-          );
-        }
-
-        await member.voice.disconnect();
-
+      if (
+        !member.voice.channel
+      ) {
         return reply(
-          `🔇 **${member.user.tag}** fue desconectado.`
-        );
-      } catch {
-        return reply(
-          "❌ No pude modificar el canal de voz del usuario."
+          "❌ Ese usuario no está conectado a voz."
         );
       }
+
+      await member.voice
+        .disconnect();
+
+      return reply(
+        `🔇 ${member} fue desconectado del canal de voz.`
+      );
     }
 
     if (
       cmd === "addrole" ||
-      cmd === "removerole" ||
-      cmd === "role"
+      cmd === "removerole"
     ) {
-      let action;
-
-      if (cmd === "role") {
-        action =
-          args[0]?.toLowerCase();
-      } else {
-        action =
-          cmd === "addrole"
-            ? "add"
-            : "remove";
-      }
-
       const member =
         mentionedMember(message);
 
-      const r =
+      const role =
         mentionedRole(message);
 
       if (
         !member ||
-        !r ||
-        !["add", "remove"].includes(action)
+        !role
+      ) {
+        return reply(
+          `❌ Usa **b!${cmd} @usuario @rol**`
+        );
+      }
+
+      if (!role.editable) {
+        return reply(
+          "❌ No puedo administrar ese rol."
+        );
+      }
+
+      if (
+        cmd === "addrole"
+      ) {
+        await member.roles.add(
+          role
+        );
+
+        return reply(
+          `✅ ${role} añadido a ${member}.`
+        );
+      }
+
+      await member.roles.remove(
+        role
+      );
+
+      return reply(
+        `✅ ${role} retirado de ${member}.`
+      );
+    }
+
+    if (cmd === "role") {
+      const action =
+        args[0]
+          ?.toLowerCase();
+
+      const member =
+        mentionedMember(message);
+
+      const role =
+        mentionedRole(message);
+
+      if (
+        !["add", "remove"].includes(
+          action
+        ) ||
+        !member ||
+        !role
       ) {
         return reply(
           "❌ Usa **b!role add @usuario @rol** o **b!role remove @usuario @rol**"
         );
       }
 
-      if (
-        r.position >=
-        message.guild.members.me.roles.highest.position
-      ) {
+      if (!role.editable) {
         return reply(
-          "❌ Ese rol está por encima de Fusake."
+          "❌ No puedo administrar ese rol."
         );
       }
 
-      try {
-        if (action === "add") {
-          await member.roles.add(r);
-        } else {
-          await member.roles.remove(r);
+      if (action === "add") {
+        await member.roles.add(
+          role
+        );
+
+        return reply(
+          `✅ ${role} añadido a ${member}.`
+        );
+      }
+
+      await member.roles.remove(
+        role
+      );
+
+      return reply(
+        `✅ ${role} retirado de ${member}.`
+      );
+    }
+
+    if (
+      cmd === "roleall" ||
+      cmd ===
+        "removeroleall"
+    ) {
+      const role =
+        mentionedRole(message);
+
+      if (!role) {
+        return reply(
+          `❌ Usa **b!${cmd} @rol**`
+        );
+      }
+
+      if (!role.editable) {
+        return reply(
+          "❌ No puedo administrar ese rol."
+        );
+      }
+
+      let changed = 0;
+
+      for (
+        const member of
+          message.guild.members
+            .cache.values()
+      ) {
+        if (
+          member.user.bot
+        ) {
+          continue;
         }
 
-        return reply(
-          `🎭 Rol ${r} ${
-            action === "add"
-              ? "añadido a"
-              : "eliminado de"
-          } **${member.user.tag}**.`
-        );
-      } catch {
-        return reply(
-          "❌ No pude modificar ese rol."
-        );
+        try {
+          if (
+            cmd === "roleall"
+          ) {
+            if (
+              !member.roles.cache.has(
+                role.id
+              )
+            ) {
+              await member.roles.add(
+                role
+              );
+
+              changed++;
+            }
+          } else {
+            if (
+              member.roles.cache.has(
+                role.id
+              )
+            ) {
+              await member.roles.remove(
+                role
+              );
+
+              changed++;
+            }
+          }
+        } catch {}
       }
+
+      return reply(
+        `🎭 Operación terminada. Miembros modificados: **${changed}**.`
+      );
     }
 
     if (cmd === "setstatus") {
-      const text = args.join(" ");
+      const text =
+        args.join(" ");
 
       if (!text) {
         return reply(
@@ -4070,7 +4980,11 @@ A partir de ahora **b!n** solamente funcionará en ${channel}.`
       client.user.setPresence({
         activities: [
           {
-            name: text,
+            name:
+              text.slice(
+                0,
+                128
+              ),
             type: 0
           }
         ],
@@ -4078,31 +4992,55 @@ A partir de ahora **b!n** solamente funcionará en ${channel}.`
       });
 
       return reply(
-        `🤖 Estado cambiado a **${text}**.`
+        `🤖 Estado actualizado a **${text}**.`
+      );
+    }
+
+    if (cmd === "clearchannel") {
+      const amount =
+        Number(args[0]);
+
+      if (
+        !Number.isInteger(
+          amount
+        ) ||
+        amount < 1 ||
+        amount > 100
+      ) {
+        return reply(
+          "❌ Usa **b!clearchannel cantidad** entre 1 y 100."
+        );
+      }
+
+      const deleted =
+        await message.channel.bulkDelete(
+          amount,
+          true
+        );
+
+      return reply(
+        `🧹 Eliminados **${deleted.size}** mensajes.`
       );
     }
 
     if (cmd === "renamechannel") {
       const name =
-        args.join("-").toLowerCase();
+        args.join(" ");
 
       if (!name) {
         return reply(
-          "❌ Usa **b!renamechannel nuevo-nombre**"
+          "❌ Usa **b!renamechannel nombre**"
         );
       }
 
-      try {
-        await message.channel.setName(name);
+      await message.channel
+        .setName(
+          name.slice(0, 100)
+        );
 
-        return reply(
-          `🃏 Canal renombrado a **${name}**.`
-        );
-      } catch {
-        return reply(
-          "❌ No pude renombrar el canal."
-        );
-      }
+      return reply(
+        "✏️ Canal renombrado."
+      );
     }
 
     if (cmd === "dm") {
@@ -4112,7 +5050,10 @@ A partir de ahora **b!n** solamente funcionará en ${channel}.`
       const text =
         args.slice(1).join(" ");
 
-      if (!member || !text) {
+      if (
+        !member ||
+        !text
+      ) {
         return reply(
           "❌ Usa **b!dm @usuario mensaje**"
         );
@@ -4120,75 +5061,110 @@ A partir de ahora **b!n** solamente funcionará en ${channel}.`
 
       try {
         await member.send({
-          content: text,
-          allowedMentions: {
-            parse: []
-          }
+          embeds: [
+            new EmbedBuilder()
+              .setColor(
+                0xf1c40f
+              )
+              .setTitle(
+                `♟️🃏 Mensaje de ${message.guild.name}`
+              )
+              .setDescription(
+                text
+              )
+              .setFooter({
+                text:
+                  "Fusake"
+              })
+              .setTimestamp()
+          ]
         });
 
         return reply(
-          "💌 Mensaje enviado."
+          `📨 Mensaje enviado a ${member}.`
         );
       } catch {
         return reply(
-          "❌ No pude enviar el MD."
+          "❌ No pude enviarle MD a ese usuario."
         );
       }
     }
 
     if (cmd === "react") {
-      if (!args[0]) {
+      const emoji =
+        args[0];
+
+      if (!emoji) {
         return reply(
-          "❌ Usa **b!react emoji**"
+          "❌ Usa **b!react emoji** respondiendo al mensaje."
+        );
+      }
+
+      let target;
+
+      if (
+        message.reference
+          ?.messageId
+      ) {
+        target =
+          await message.channel.messages
+            .fetch(
+              message.reference
+                .messageId
+            )
+            .catch(
+              () => null
+            );
+      }
+
+      if (!target) {
+        return reply(
+          "❌ Responde al mensaje al que quieres reaccionar."
         );
       }
 
       try {
-        await message.react(args[0]);
-        return;
+        await target.react(
+          emoji
+        );
+
+        return message
+          .react("✅")
+          .catch(() => {});
       } catch {
         return reply(
-          "❌ No pude añadir esa reacción."
+          "❌ No pude usar ese emoji."
         );
       }
     }
 
     if (cmd === "clearlast") {
       const messages =
-        await message.channel.messages
-          .fetch({
-            limit: 10
-          })
-          .catch(() => null);
+        await message.channel.messages.fetch({
+          limit: 20
+        });
 
-      if (!messages) {
-        return reply(
-          "❌ No pude obtener los mensajes."
-        );
-      }
-
-      const botMessages =
-        messages.filter(
-          m =>
-            m.author.id ===
+      const botMessage =
+        messages.find(
+          msg =>
+            msg.author.id ===
             client.user.id
         );
 
-      let deleted = 0;
-
-      for (
-        const msg of
-          botMessages.values()
-      ) {
-        try {
-          await msg.delete();
-          deleted++;
-        } catch {}
+      if (!botMessage) {
+        return reply(
+          "❌ No encontré un mensaje reciente de Fusake."
+        );
       }
 
-      return message.channel.send(
-        `♟️ Eliminé **${deleted} mensajes recientes de Fusake**.`
-      );
+      await botMessage
+        .delete();
+
+      await message
+        .delete()
+        .catch(() => {});
+
+      return;
     }
 
     // ==================================================
@@ -4196,44 +5172,60 @@ A partir de ahora **b!n** solamente funcionará en ${channel}.`
     // ==================================================
 
     if (cmd === "sorteo") {
-      const fullText =
-        args.join(" ");
-
-      const sections =
-        fullText.split("|");
-
-      const main =
-        sections[0]
-          .trim()
-          .split(/\s+/);
-
-      const requirementsText =
-        sections
-          .slice(1)
-          .join("|")
-          .trim();
-
       const timeText =
-        main.shift();
+        args.shift();
 
       const winners =
-        Number(main.shift());
+        Number(
+          args.shift()
+        );
 
-      const prize =
-        main.join(" ");
+      const remaining =
+        args.join(" ");
+
+      const separator =
+        remaining.indexOf("|");
+
+      let prize =
+        remaining;
+
+      let requirements =
+        "";
+
+      if (
+        separator !== -1
+      ) {
+        prize =
+          remaining
+            .slice(
+              0,
+              separator
+            )
+            .trim();
+
+        requirements =
+          remaining
+            .slice(
+              separator + 1
+            )
+            .trim();
+      }
 
       const time =
-        parseDuration(timeText);
+        parseDuration(
+          timeText
+        );
 
       if (
         !time ||
-        !Number.isInteger(winners) ||
+        !Number.isInteger(
+          winners
+        ) ||
         winners < 1 ||
-        winners > 50 ||
         !prize
       ) {
         return reply(
-          "❌ Usa **b!sorteo 1h30m 2 Premio**\nCon requisitos: **b!sorteo 1h30m 2 Premio | 5 invites, 1000 mensajes**"
+          "❌ Usa **b!sorteo 1h30m 2 Premio**\nOpcional: **b!sorteo 1h30m 2 Premio | 5 invites, 1000 mensajes**"
         );
       }
 
@@ -4246,7 +5238,7 @@ A partir de ahora **b!n** solamente funcionará en ${channel}.`
             time,
             winners,
             prize,
-            requirementsText
+            requirements
           );
 
         return reply(
@@ -4260,7 +5252,8 @@ A partir de ahora **b!n** solamente funcionará en ${channel}.`
     }
 
     if (cmd === "sorteoend") {
-      const id = args[0];
+      const id =
+        args[0];
 
       if (!id) {
         return reply(
@@ -4281,8 +5274,12 @@ A partir de ahora **b!n** solamente funcionará en ${channel}.`
       );
     }
 
-    if (cmd === "sorteoreroll") {
-      const id = args[0];
+    if (
+      cmd ===
+      "sorteoreroll"
+    ) {
+      const id =
+        args[0];
 
       if (!id) {
         return reply(
@@ -4308,24 +5305,173 @@ A partir de ahora **b!n** solamente funcionará en ${channel}.`
     // BOT
     // ==================================================
 
+    if (cmd === "ping") {
+      return reply(
+        `🏓 Pong! **${client.ws.ping}ms**`
+      );
+    }
+
+    if (cmd === "uptime") {
+      return reply(
+        `⏱️ Fusake lleva encendido **${duration(client.uptime)}**.`
+      );
+    }
+
+    if (cmd === "botinfo") {
+      return reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(
+              0xf1c40f
+            )
+            .setTitle(
+              "♟️🃏 Fusake"
+            )
+            .setThumbnail(
+              client.user
+                .displayAvatarURL()
+            )
+            .addFields(
+              {
+                name:
+                  "🌐 Servidores",
+                value:
+                  `${client.guilds.cache.size}`,
+                inline:
+                  true
+              },
+              {
+                name:
+                  "👥 Usuarios",
+                value:
+                  `${client.guilds.cache.reduce(
+                    (
+                      total,
+                      guild
+                    ) =>
+                      total +
+                      guild.memberCount,
+                    0
+                  )}`,
+                inline:
+                  true
+              },
+              {
+                name:
+                  "🏓 Ping",
+                value:
+                  `${client.ws.ping}ms`,
+                inline:
+                  true
+              },
+              {
+                name:
+                  "⏱️ Uptime",
+                value:
+                  duration(
+                    client.uptime
+                  ),
+                inline:
+                  true
+              },
+              {
+                name:
+                  "🤖 IA",
+                value:
+                  OPENROUTER_API_KEY
+                    ? "OpenRouter ✅"
+                    : "Sin configurar ❌",
+                inline:
+                  true
+              },
+              {
+                name:
+                  "⚡ Prefijo",
+                value:
+                  PREFIX,
+                inline:
+                  true
+              }
+            )
+            .setFooter({
+              text:
+                "♟️ Fusake • 🃏 Red Kings"
+            })
+        ]
+      });
+    }
+
+    if (cmd === "memory") {
+      const memory =
+        process.memoryUsage();
+
+      return reply(
+        `🧠 **Memoria de Fusake**
+RSS: **${(
+          memory.rss /
+          1024 /
+          1024
+        ).toFixed(2)} MB**
+Heap usado: **${(
+          memory.heapUsed /
+          1024 /
+          1024
+        ).toFixed(2)} MB**
+Heap total: **${(
+          memory.heapTotal /
+          1024 /
+          1024
+        ).toFixed(2)} MB**`
+      );
+    }
+
+    if (cmd === "serverlist") {
+      const servers =
+        client.guilds.cache
+          .map(
+            guild =>
+              `• **${guild.name}** — ${guild.memberCount} miembros`
+          )
+          .slice(0, 50)
+          .join("\n");
+
+      return reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(
+              0x3498db
+            )
+            .setTitle(
+              "🌐 Servidores de Fusake"
+            )
+            .setDescription(
+              servers ||
+                "Ninguno."
+            )
+        ]
+      });
+    }
+
     if (cmd === "botavatar") {
-      if (!args[0]) {
+      const url =
+        args[0];
+
+      if (!url) {
         return reply(
           "❌ Usa **b!botavatar URL**"
         );
       }
 
       try {
-        await client.user.setAvatar(
-          args[0]
-        );
+        await client.user
+          .setAvatar(url);
 
         return reply(
-          "♟️🃏 Avatar de Fusake actualizado."
+          "🖼️ Avatar de Fusake actualizado."
         );
       } catch {
         return reply(
-          "❌ No pude cambiar el avatar."
+          "❌ No pude cambiar el avatar. Revisa la URL o inténtalo más tarde."
         );
       }
     }
@@ -4341,101 +5487,35 @@ A partir de ahora **b!n** solamente funcionará en ${channel}.`
       }
 
       try {
-        await client.user.setUsername(
-          name
-        );
+        await client.user
+          .setUsername(
+            name.slice(0, 32)
+          );
 
         return reply(
-          "🃏 Nombre del bot cambiado."
+          `🤖 Nombre cambiado a **${name.slice(0, 32)}**.`
         );
       } catch {
         return reply(
-          "❌ No pude cambiar el nombre."
+          "❌ No pude cambiar el nombre. Discord limita la frecuencia de estos cambios."
         );
       }
     }
 
     if (cmd === "restart") {
       await reply(
-        "♟️ Fusake se está reiniciando..."
+        "🔄 Reiniciando Fusake..."
       );
 
-      setTimeout(
-        () => process.exit(0),
-        1500
-      );
-
-      return;
+      process.exit(0);
     }
 
-    if (cmd === "serverlist") {
-      const list =
-        client.guilds.cache
-          .map(
-            guild =>
-              `♟️ **${guild.name}** — ${guild.memberCount} miembros`
-          )
-          .join("\n")
-          .slice(0, 1900);
-
-      return reply(
-        list || "Sin servidores."
-      );
-    }
-
-    if (cmd === "memory") {
-      const memory =
-        process.memoryUsage();
-
-      return reply(
-        `🧠 RAM utilizada: **${Math.round(
-          memory.heapUsed /
-            1024 /
-            1024
-        )} MB**
-📦 Heap total: **${Math.round(
-          memory.heapTotal /
-            1024 /
-            1024
-        )} MB**
-🤖 Conversaciones IA en memoria: **${aiConversations.size}**`
-      );
-    }
-
-    if (cmd === "botinfo") {
-      return reply(
-        `♟️🃏 **${client.user.tag}**
-
-🌐 Servidores: ${client.guilds.cache.size}
-📡 Ping: ${client.ws.ping}ms
-⚡ Prefijo: ${PREFIX}
-🤖 IA: Gemini
-💬 Comando IA: b!n
-📍 Canal IA: ${
-          d.aiChannel
-            ? `<#${d.aiChannel}>`
-            : "Todos los canales"
-        }
-🤖 Slash commands: /`
-      );
-    }
-
-    if (cmd === "uptime") {
-      return reply(
-        `⏱️ Fusake lleva encendido **${duration(
-          client.uptime
-        )}**.`
-      );
-    }
-
-    if (cmd === "ping") {
-      return reply(
-        `🏓 Pong! **${client.ws.ping}ms**`
-      );
-    }
+    // ==================================================
+    // COMANDO NO ENCONTRADO
+    // ==================================================
 
     return reply(
-      `❓ Comando desconocido. Usa **${PREFIX}help** para ver el menú.`
+      `❓ No reconozco ese comando. Usa **${PREFIX}help**.`
     );
   }
 );
@@ -4447,191 +5527,147 @@ A partir de ahora **b!n** solamente funcionará en ${channel}.`
 client.on(
   "interactionCreate",
   async interaction => {
-    if (!interaction.guild) return;
-
-    // ==================================================
-    // HELP MENU
-    // ==================================================
-
     if (
-      interaction.isStringSelectMenu() &&
-      interaction.customId === "fusake_help"
+      interaction.isStringSelectMenu()
     ) {
-      if (
-        !(await adminOnlyInteraction(
-          interaction
-        ))
-      ) {
-        return;
-      }
-
-      const selected =
-        help[interaction.values[0]];
-
-      if (!selected) {
-        return interaction.reply({
-          content:
-            "❌ Categoría no encontrada.",
-          ephemeral: true
-        });
-      }
-
-      return interaction.reply({
-        embeds: [
-          new EmbedBuilder()
-            .setColor(0xf1c40f)
-            .setTitle(selected[0])
-            .setDescription(
-              selected
-                .slice(1)
-                .map(command =>
-                  command
-                    ? `**${command}**`
-                    : "\u200b"
-                )
-                .join("\n")
-            )
-            .setFooter({
-              text:
-                "♟️🃏 Fusake • Solo administradores"
-            })
-            .setTimestamp()
-        ],
-        ephemeral: true
-      });
-    }
-
-    // ==================================================
-    // MENÚ DE ROLES
-    // ==================================================
-
-    if (
-      interaction.isStringSelectMenu() &&
-      interaction.customId.startsWith(
-        "reacrol_menu:"
-      )
-    ) {
-      const messageId =
-        interaction.customId.split(":")[1];
-
-      const d =
-        getGuildData(
-          interaction.guild.id
-        );
-
-      const panel =
-        getReactionRolePanel(
-          d,
-          messageId
-        );
+      // ================================================
+      // HELP MENU
+      // ================================================
 
       if (
-        !panel ||
-        panel.type !== "MENU"
+        interaction.customId ===
+        "fusake_help"
       ) {
-        return interaction.reply({
-          content:
-            "❌ Este menú de roles ya no está configurado.",
-          ephemeral: true
-        });
-      }
-
-      const selectedRoleId =
-        interaction.values[0];
-
-      const selectedOption =
-        panel.options.find(
-          option =>
-            option.roleId ===
-            selectedRoleId
-        );
-
-      if (!selectedOption) {
-        return interaction.reply({
-          content:
-            "❌ Rol no encontrado.",
-          ephemeral: true
-        });
-      }
-
-      const member =
-        await interaction.guild.members
-          .fetch(interaction.user.id)
-          .catch(() => null);
-
-      if (!member) {
-        return interaction.reply({
-          content:
-            "❌ No pude encontrar tu usuario.",
-          ephemeral: true
-        });
-      }
-
-      const role =
-        interaction.guild.roles.cache.get(
-          selectedRoleId
-        );
-
-      if (!role) {
-        return interaction.reply({
-          content:
-            "❌ Ese rol ya no existe.",
-          ephemeral: true
-        });
-      }
-
-      if (!role.editable) {
-        return interaction.reply({
-          content:
-            "❌ Fusake no puede administrar ese rol. Coloca el rol de Fusake por encima.",
-          ephemeral: true
-        });
-      }
-
-      try {
-        for (
-          const option of
-            panel.options
+        if (
+          !(await adminOnlyInteraction(
+            interaction
+          ))
         ) {
-          if (
-            option.roleId !==
-              selectedRoleId &&
-            member.roles.cache.has(
-              option.roleId
-            )
-          ) {
-            const oldRole =
-              interaction.guild.roles.cache.get(
-                option.roleId
-              );
-
-            if (
-              oldRole?.editable
-            ) {
-              await member.roles.remove(
-                oldRole
-              );
-            }
-          }
+          return;
         }
+
+        const category =
+          interaction.values[0];
+
+        const lines =
+          help[category];
+
+        if (!lines) {
+          return interaction.reply({
+            content:
+              "❌ Categoría no encontrada.",
+            ephemeral: true
+          });
+        }
+
+        return interaction.reply({
+          embeds: [
+            new EmbedBuilder()
+              .setColor(
+                0xf1c40f
+              )
+              .setTitle(
+                lines[0]
+              )
+              .setDescription(
+                lines
+                  .slice(1)
+                  .map(
+                    line =>
+                      line
+                        ? `\`${line}\``
+                        : ""
+                  )
+                  .join("\n")
+              )
+              .setFooter({
+                text:
+                  "♟️ Fusake • 🃏 Red Kings"
+              })
+          ],
+          ephemeral: true
+        });
+      }
+
+      // ================================================
+      // MENÚ DE ROLES
+      // ================================================
+
+      if (
+        interaction.customId.startsWith(
+          "reacrol_menu:"
+        )
+      ) {
+        if (
+          !interaction.guild
+        ) {
+          return;
+        }
+
+        const messageId =
+          interaction.customId
+            .split(":")[1];
+
+        const d =
+          getGuildData(
+            interaction.guild.id
+          );
+
+        const panel =
+          getReactionRolePanel(
+            d,
+            messageId
+          );
+
+        if (!panel) {
+          return interaction.reply({
+            content:
+              "❌ Este panel de roles ya no existe.",
+            ephemeral: true
+          });
+        }
+
+        const roleId =
+          interaction.values[0];
+
+        const role =
+          interaction.guild.roles.cache
+            .get(roleId);
+
+        if (!role) {
+          return interaction.reply({
+            content:
+              "❌ Ese rol ya no existe.",
+            ephemeral: true
+          });
+        }
+
+        const member =
+          interaction.member;
 
         if (
-          !member.roles.cache.has(
-            selectedRoleId
+          member.roles.cache.has(
+            role.id
           )
         ) {
-          await member.roles.add(role);
+          await member.roles
+            .remove(role)
+            .catch(() => {});
+
+          return interaction.reply({
+            content:
+              `➖ Se retiró ${role}.`,
+            ephemeral: true
+          });
         }
+
+        await member.roles
+          .add(role)
+          .catch(() => {});
 
         return interaction.reply({
           content:
-            `✅ Ahora tenés el rol ${role}.\n♟️ Si tenías otro rol de este menú, fue retirado automáticamente.`,
-          ephemeral: true
-        });
-      } catch (error) {
-        return interaction.reply({
-          content:
-            `❌ No pude modificar tus roles: ${error.message}`,
+            `➕ Recibiste ${role}.`,
           ephemeral: true
         });
       }
@@ -4641,14 +5677,27 @@ client.on(
     // BOTONES
     // ==================================================
 
-    if (interaction.isButton()) {
+    if (
+      interaction.isButton()
+    ) {
+      // ================================================
+      // BOTÓN DE ROLES
+      // ================================================
+
       if (
         interaction.customId.startsWith(
           "reacrol_button:"
         )
       ) {
+        if (
+          !interaction.guild
+        ) {
+          return;
+        }
+
         const parts =
-          interaction.customId.split(":");
+          interaction.customId
+            .split(":");
 
         const messageId =
           parts[1];
@@ -4667,51 +5716,17 @@ client.on(
             messageId
           );
 
-        if (
-          !panel ||
-          panel.type !== "BOTON"
-        ) {
+        if (!panel) {
           return interaction.reply({
             content:
-              "❌ Este botón de rol ya no está configurado.",
-            ephemeral: true
-          });
-        }
-
-        const option =
-          panel.options.find(
-            item =>
-              item.roleId ===
-              roleId
-          );
-
-        if (!option) {
-          return interaction.reply({
-            content:
-              "❌ Esta opción ya no existe.",
-            ephemeral: true
-          });
-        }
-
-        const member =
-          await interaction.guild.members
-            .fetch(
-              interaction.user.id
-            )
-            .catch(() => null);
-
-        if (!member) {
-          return interaction.reply({
-            content:
-              "❌ No pude encontrar tu usuario.",
+              "❌ Este panel de roles ya no existe.",
             ephemeral: true
           });
         }
 
         const role =
-          interaction.guild.roles.cache.get(
-            roleId
-          );
+          interaction.guild.roles.cache
+            .get(roleId);
 
         if (!role) {
           return interaction.reply({
@@ -4721,49 +5736,38 @@ client.on(
           });
         }
 
-        if (!role.editable) {
+        const member =
+          interaction.member;
+
+        if (
+          member.roles.cache.has(
+            role.id
+          )
+        ) {
+          await member.roles
+            .remove(role)
+            .catch(() => {});
+
           return interaction.reply({
             content:
-              "❌ Fusake no puede administrar ese rol. Coloca el rol de Fusake por encima.",
+              `➖ Se retiró ${role}.`,
             ephemeral: true
           });
         }
 
-        try {
-          if (
-            member.roles.cache.has(
-              roleId
-            )
-          ) {
-            await member.roles.remove(
-              role
-            );
+        await member.roles
+          .add(role)
+          .catch(() => {});
 
-            return interaction.reply({
-              content:
-                `➖ Te quité el rol ${role}.`,
-              ephemeral: true
-            });
-          }
-
-          await member.roles.add(role);
-
-          return interaction.reply({
-            content:
-              `➕ Te agregué el rol ${role}.`,
-            ephemeral: true
-          });
-        } catch (error) {
-          return interaction.reply({
-            content:
-              `❌ No pude modificar el rol: ${error.message}`,
-            ephemeral: true
-          });
-        }
+        return interaction.reply({
+          content:
+            `➕ Recibiste ${role}.`,
+          ephemeral: true
+        });
       }
 
       // ================================================
-      // SORTEO — PARTICIPAR
+      // PARTICIPAR EN SORTEO
       // ================================================
 
       if (
@@ -4771,8 +5775,15 @@ client.on(
           "giveaway_join:"
         )
       ) {
+        if (
+          !interaction.guild
+        ) {
+          return;
+        }
+
         const id =
-          interaction.customId.split(":")[1];
+          interaction.customId
+            .split(":")[1];
 
         const d =
           getGuildData(
@@ -4782,15 +5793,10 @@ client.on(
         const giveaway =
           d.giveaways[id];
 
-        if (!giveaway) {
-          return interaction.reply({
-            content:
-              "❌ Este sorteo ya no existe.",
-            ephemeral: true
-          });
-        }
-
-        if (giveaway.ended) {
+        if (
+          !giveaway ||
+          giveaway.ended
+        ) {
           return interaction.reply({
             content:
               "❌ Este sorteo ya terminó.",
@@ -4812,18 +5818,20 @@ client.on(
 
           saveData();
 
-          try {
-            await interaction.message.edit({
+          await interaction.message
+            .edit({
               embeds: [
-                giveawayEmbed(giveaway)
+                giveawayEmbed(
+                  giveaway
+                )
               ],
               components: [
                 giveawayButtons(
                   giveaway.id
                 )
               ]
-            });
-          } catch {}
+            })
+            .catch(() => {});
 
           return interaction.reply({
             content:
@@ -4832,34 +5840,17 @@ client.on(
           });
         }
 
-        const requirementCheck =
+        const check =
           checkGiveawayRequirements(
             interaction.guild,
             interaction.user.id,
             giveaway
           );
 
-        if (!requirementCheck.ok) {
+        if (!check.ok) {
           return interaction.reply({
-            embeds: [
-              new EmbedBuilder()
-                .setColor(0xe74c3c)
-                .setTitle(
-                  "❌ NO CUMPLES LOS REQUISITOS"
-                )
-                .setDescription(
-                  `No podés participar todavía en este sorteo.
-
-${requirementCheck.failed.join("\n")}
-
-📋 **Requisitos del sorteo**
-${requirementText(giveaway)}`
-                )
-                .setFooter({
-                  text:
-                    "♟️ Cumple los requisitos e inténtalo nuevamente 🃏"
-                })
-            ],
+            content:
+              `❌ No cumples los requisitos del sorteo:\n\n${check.failed.join("\n")}`,
             ephemeral: true
           });
         }
@@ -4870,33 +5861,46 @@ ${requirementText(giveaway)}`
 
         saveData();
 
-        try {
-          await interaction.message.edit({
+        await interaction.message
+          .edit({
             embeds: [
-              giveawayEmbed(giveaway)
+              giveawayEmbed(
+                giveaway
+              )
             ],
             components: [
               giveawayButtons(
                 giveaway.id
               )
             ]
-          });
-        } catch {}
+          })
+          .catch(() => {});
 
         return interaction.reply({
           content:
-            `🎉 ¡Ya estás participando por **${giveaway.prize}**!`,
+            "🎉 Entraste al sorteo correctamente.",
           ephemeral: true
         });
       }
+
+      // ================================================
+      // VER PARTICIPANTES
+      // ================================================
 
       if (
         interaction.customId.startsWith(
           "giveaway_users:"
         )
       ) {
+        if (
+          !interaction.guild
+        ) {
+          return;
+        }
+
         const id =
-          interaction.customId.split(":")[1];
+          interaction.customId
+            .split(":")[1];
 
         const d =
           getGuildData(
@@ -4915,24 +5919,30 @@ ${requirementText(giveaway)}`
         }
 
         const users =
-          giveaway.participants.length
-            ? giveaway.participants
-                .slice(0, 50)
-                .map(
-                  (userId, index) =>
-                    `${index + 1}. <@${userId}>`
-                )
-                .join("\n")
-            : "Todavía no hay participantes.";
+          giveaway.participants
+            .slice(0, 50)
+            .map(
+              (
+                userId,
+                index
+              ) =>
+                `${index + 1}. <@${userId}>`
+            )
+            .join("\n");
 
         return interaction.reply({
           embeds: [
             new EmbedBuilder()
-              .setColor(0x3498db)
-              .setTitle(
-                "👥 Participantes del sorteo"
+              .setColor(
+                0x3498db
               )
-              .setDescription(users)
+              .setTitle(
+                "👥 Participantes"
+              )
+              .setDescription(
+                users ||
+                  "Todavía no hay participantes."
+              )
               .setFooter({
                 text:
                   `Total: ${giveaway.participants.length}`
@@ -4941,6 +5951,8 @@ ${requirementText(giveaway)}`
           ephemeral: true
         });
       }
+
+      return;
     }
 
     // ==================================================
@@ -4949,6 +5961,12 @@ ${requirementText(giveaway)}`
 
     if (
       !interaction.isChatInputCommand()
+    ) {
+      return;
+    }
+
+    if (
+      !interaction.guild
     ) {
       return;
     }
@@ -4966,18 +5984,33 @@ ${requirementText(giveaway)}`
         interaction.guild.id
       );
 
-    const cmd =
-      interaction.commandName;
+    // ==================================================
+    // /HELP
+    // ==================================================
 
-    if (cmd === "help") {
+    if (
+      interaction.commandName ===
+      "help"
+    ) {
       return interaction.reply({
-        embeds: [helpEmbed()],
-        components: [helpMenu()],
+        embeds: [
+          helpEmbed()
+        ],
+        components: [
+          helpMenu()
+        ],
         ephemeral: true
       });
     }
 
-    if (cmd === "ping") {
+    // ==================================================
+    // /PING
+    // ==================================================
+
+    if (
+      interaction.commandName ===
+      "ping"
+    ) {
       return interaction.reply({
         content:
           `🏓 Pong! **${client.ws.ping}ms**`,
@@ -4985,55 +6018,105 @@ ${requirementText(giveaway)}`
       });
     }
 
-    if (cmd === "uptime") {
+    // ==================================================
+    // /UPTIME
+    // ==================================================
+
+    if (
+      interaction.commandName ===
+      "uptime"
+    ) {
       return interaction.reply({
         content:
-          `⏱️ Fusake lleva encendido **${duration(
-            client.uptime
-          )}**.`,
+          `⏱️ Fusake lleva encendido **${duration(client.uptime)}**.`,
         ephemeral: true
       });
     }
 
-    if (cmd === "botinfo") {
-      return interaction.reply({
-        content:
-          `♟️🃏 **${client.user.tag}**
+    // ==================================================
+    // /BOTINFO
+    // ==================================================
 
-🌐 Servidores: ${client.guilds.cache.size}
-📡 Ping: ${client.ws.ping}ms
-⚡ Prefijo: ${PREFIX}
-🤖 IA: Gemini
-📍 Canal IA: ${
-            d.aiChannel
-              ? `<#${d.aiChannel}>`
-              : "Todos los canales"
-          }
-🤖 Slash commands: /`,
+    if (
+      interaction.commandName ===
+      "botinfo"
+    ) {
+      return interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(
+              0xf1c40f
+            )
+            .setTitle(
+              "♟️🃏 Fusake"
+            )
+            .setThumbnail(
+              client.user
+                .displayAvatarURL()
+            )
+            .addFields(
+              {
+                name:
+                  "🌐 Servidores",
+                value:
+                  `${client.guilds.cache.size}`,
+                inline:
+                  true
+              },
+              {
+                name:
+                  "🏓 Ping",
+                value:
+                  `${client.ws.ping}ms`,
+                inline:
+                  true
+              },
+              {
+                name:
+                  "🤖 IA",
+                value:
+                  OPENROUTER_API_KEY
+                    ? "OpenRouter ✅"
+                    : "Sin configurar ❌",
+                inline:
+                  true
+              }
+            )
+        ],
         ephemeral: true
       });
     }
 
-    if (cmd === "embed") {
-      const colorText =
-        interaction.options.getString(
-          "color",
-          true
+    // ==================================================
+    // /EMBED
+    // ==================================================
+
+    if (
+      interaction.commandName ===
+      "embed"
+    ) {
+      const color =
+        parseColor(
+          interaction.options
+            .getString(
+              "color",
+              true
+            )
         );
 
       const text =
-        interaction.options.getString(
-          "mensaje",
-          true
-        );
+        interaction.options
+          .getString(
+            "mensaje",
+            true
+          );
 
-      const color =
-        parseColor(colorText);
-
-      if (color === null) {
+      if (
+        color === null
+      ) {
         return interaction.reply({
           content:
-            "❌ Color inválido. Ejemplo: `#ff0000`",
+            "❌ Color inválido. Usa algo como `#ff0000`.",
           ephemeral: true
         });
       }
@@ -5042,7 +6125,10 @@ ${requirementText(giveaway)}`
         embeds: [
           new EmbedBuilder()
             .setColor(color)
-            .setDescription(text)
+            .setDescription(
+              text
+            )
+            .setTimestamp()
         ]
       });
 
@@ -5053,24 +6139,35 @@ ${requirementText(giveaway)}`
       });
     }
 
-    if (cmd === "bienvenida") {
+    // ==================================================
+    // /BIENVENIDA
+    // ==================================================
+
+    if (
+      interaction.commandName ===
+      "bienvenida"
+    ) {
       const disable =
-        interaction.options.getBoolean(
-          "desactivar"
-        );
+        interaction.options
+          .getBoolean(
+            "desactivar"
+          );
 
       const channel =
-        interaction.options.getChannel(
-          "canal"
-        );
+        interaction.options
+          .getChannel(
+            "canal"
+          );
 
       if (disable) {
-        d.welcomeChannel = null;
+        d.welcomeChannel =
+          null;
+
         saveData();
 
         return interaction.reply({
           content:
-            "♟️ Bienvenidas desactivadas.",
+            "👋 Bienvenidas desactivadas.",
           ephemeral: true
         });
       }
@@ -5078,7 +6175,7 @@ ${requirementText(giveaway)}`
       if (!channel) {
         return interaction.reply({
           content:
-            "❌ Selecciona un canal o usa `desactivar`.",
+            "❌ Selecciona un canal o activa `desactivar`.",
           ephemeral: true
         });
       }
@@ -5095,19 +6192,30 @@ ${requirementText(giveaway)}`
       });
     }
 
-    if (cmd === "logs") {
+    // ==================================================
+    // /LOGS
+    // ==================================================
+
+    if (
+      interaction.commandName ===
+      "logs"
+    ) {
       const disable =
-        interaction.options.getBoolean(
-          "desactivar"
-        );
+        interaction.options
+          .getBoolean(
+            "desactivar"
+          );
 
       const channel =
-        interaction.options.getChannel(
-          "canal"
-        );
+        interaction.options
+          .getChannel(
+            "canal"
+          );
 
       if (disable) {
-        d.logsChannel = null;
+        d.logsChannel =
+          null;
+
         saveData();
 
         return interaction.reply({
@@ -5137,19 +6245,27 @@ ${requirementText(giveaway)}`
       });
     }
 
-    if (cmd === "autorole") {
+    // ==================================================
+    // /AUTOROLE
+    // ==================================================
+
+    if (
+      interaction.commandName ===
+      "autorole"
+    ) {
       const disable =
-        interaction.options.getBoolean(
-          "desactivar"
-        );
+        interaction.options
+          .getBoolean(
+            "desactivar"
+          );
 
       const role =
-        interaction.options.getRole(
-          "rol"
-        );
+        interaction.options
+          .getRole("rol");
 
       if (disable) {
         d.autoRole = null;
+
         saveData();
 
         return interaction.reply({
@@ -5167,19 +6283,8 @@ ${requirementText(giveaway)}`
         });
       }
 
-      if (
-        role.position >=
-        interaction.guild.members.me
-          .roles.highest.position
-      ) {
-        return interaction.reply({
-          content:
-            "❌ Ese rol está por encima del rol de Fusake.",
-          ephemeral: true
-        });
-      }
-
-      d.autoRole = role.id;
+      d.autoRole =
+        role.id;
 
       saveData();
 
@@ -5190,19 +6295,29 @@ ${requirementText(giveaway)}`
       });
     }
 
-    if (cmd === "invite") {
+    // ==================================================
+    // /INVITE
+    // ==================================================
+
+    if (
+      interaction.commandName ===
+      "invite"
+    ) {
       const disable =
-        interaction.options.getBoolean(
-          "desactivar"
-        );
+        interaction.options
+          .getBoolean(
+            "desactivar"
+          );
 
       const channel =
-        interaction.options.getChannel(
-          "canal"
-        );
+        interaction.options
+          .getChannel(
+            "canal"
+          );
 
       if (disable) {
-        d.inviteChannel = null;
+        d.inviteChannel =
+          null;
 
         saveData();
 
@@ -5228,16 +6343,24 @@ ${requirementText(giveaway)}`
 
       return interaction.reply({
         content:
-          `🔗 Las nuevas invitaciones aparecerán en ${channel}.`,
+          `🔗 Canal de invitaciones: ${channel}.`,
         ephemeral: true
       });
     }
 
-    if (cmd === "invites") {
+    // ==================================================
+    // /INVITES
+    // ==================================================
+
+    if (
+      interaction.commandName ===
+      "invites"
+    ) {
       const user =
-        interaction.options.getUser(
-          "usuario"
-        ) ||
+        interaction.options
+          .getUser(
+            "usuario"
+          ) ||
         interaction.user;
 
       const stats =
@@ -5247,59 +6370,48 @@ ${requirementText(giveaway)}`
         );
 
       const inside =
-        stats.members.filter(id =>
-          interaction.guild.members.cache.has(
-            id
-          )
+        stats.members.filter(
+          id =>
+            interaction.guild
+              .members.cache
+              .has(id)
         );
-
-      const list =
-        inside.length
-          ? inside
-              .slice(0, 30)
-              .map(
-                (id, index) =>
-                  `${index + 1}. <@${id}>`
-              )
-              .join("\n")
-          : "Ninguno registrado.";
 
       return interaction.reply({
         embeds: [
           new EmbedBuilder()
-            .setColor(0xf1c40f)
-            .setTitle(
-              `🔗🃏 Invitaciones de ${user.username}`
+            .setColor(
+              0xf1c40f
             )
-            .setThumbnail(
-              user.displayAvatarURL()
+            .setTitle(
+              `🔗 Invitaciones de ${user.username}`
             )
             .addFields(
               {
-                name: "🆕 Nuevas",
-                value: `${stats.joins}`,
-                inline: true
-              },
-              {
-                name: "🚪 Salieron",
-                value: `${stats.leaves}`,
-                inline: true
-              },
-              {
-                name: "👥 En servidor",
-                value: `${inside.length}`,
-                inline: true
+                name:
+                  "🆕 Nuevas",
+                value:
+                  `${stats.joins}`,
+                inline:
+                  true
               },
               {
                 name:
-                  "♟️ Usuarios invitados",
-                value: list
+                  "🚪 Salieron",
+                value:
+                  `${stats.leaves}`,
+                inline:
+                  true
+              },
+              {
+                name:
+                  "👥 Dentro",
+                value:
+                  `${inside.length}`,
+                inline:
+                  true
               }
             )
-            .setFooter({
-              text:
-                "Fusake registra los invites desde que se activó el sistema."
-            })
         ],
         ephemeral: true
       });
@@ -5309,233 +6421,180 @@ ${requirementText(giveaway)}`
     // /REACROL
     // ==================================================
 
-    if (cmd === "reacrol") {
+    if (
+      interaction.commandName ===
+      "reacrol"
+    ) {
       const messageId =
-        interaction.options.getString(
-          "id_mensaje",
-          true
-        );
+        interaction.options
+          .getString(
+            "id_mensaje",
+            true
+          );
 
       const role =
-        interaction.options.getRole(
-          "rol",
-          true
-        );
+        interaction.options
+          .getRole(
+            "rol",
+            true
+          );
 
       const emoji =
-        interaction.options.getString(
-          "emoji",
-          true
-        );
+        interaction.options
+          .getString(
+            "emoji",
+            true
+          );
 
       const type =
-        interaction.options.getString(
-          "tipo",
-          true
-        );
+        interaction.options
+          .getString(
+            "tipo",
+            true
+          );
 
       const label =
-        interaction.options.getString(
-          "mensaje",
-          true
-        );
+        interaction.options
+          .getString(
+            "mensaje",
+            true
+          );
+
+      let target;
+
+      try {
+        target =
+          await interaction.channel.messages
+            .fetch(messageId);
+      } catch {
+        return interaction.reply({
+          content:
+            "❌ No encontré ese mensaje en este canal.",
+          ephemeral: true
+        });
+      }
 
       if (
-        role.position >=
-        interaction.guild.members.me
-          .roles.highest.position
+        !d.reactionRoles[
+          messageId
+        ]
       ) {
-        return interaction.reply({
-          content:
-            "❌ Ese rol está por encima del rol de Fusake. Mové el rol de Fusake por encima.",
-          ephemeral: true
-        });
-      }
-
-      const targetMessage =
-        await interaction.channel.messages
-          .fetch(messageId)
-          .catch(() => null);
-
-      if (!targetMessage) {
-        return interaction.reply({
-          content:
-            "❌ No encontré ese mensaje en este canal. Asegurate de copiar correctamente su ID.",
-          ephemeral: true
-        });
-      }
-
-      let panel =
-        d.reactionRoles[messageId];
-
-      if (!panel) {
-        panel = {
+        d.reactionRoles[
+          messageId
+        ] = {
           messageId,
           channelId:
             interaction.channel.id,
           type,
           options: []
         };
+      }
 
+      const panel =
         d.reactionRoles[
           messageId
-        ] = panel;
-      }
+        ];
 
       if (
         panel.type !== type
       ) {
-        return interaction.reply({
-          content:
-            `❌ Ese mensaje ya tiene un sistema **${panel.type}**.\nNo podés mezclar MENÚ y BOTONES en el mismo panel.`,
-          ephemeral: true
-        });
+        panel.type =
+          type;
+
+        panel.options =
+          [];
       }
 
-      const alreadyExists =
-        panel.options.some(
+      const existing =
+        panel.options.find(
           option =>
             option.roleId ===
             role.id
         );
 
-      if (alreadyExists) {
-        return interaction.reply({
-          content:
-            "❌ Ese rol ya está agregado en este panel.",
-          ephemeral: true
+      if (existing) {
+        existing.emoji =
+          emoji;
+
+        existing.label =
+          label;
+      } else {
+        panel.options.push({
+          roleId:
+            role.id,
+          emoji,
+          label
         });
       }
-
-      if (
-        panel.options.length >=
-        25
-      ) {
-        return interaction.reply({
-          content:
-            "❌ Este panel ya llegó al máximo de **25 roles**.",
-          ephemeral: true
-        });
-      }
-
-      panel.options.push({
-        roleId: role.id,
-        emoji,
-        label
-      });
 
       saveData();
 
       try {
-        await updateReactionRoleMessage(
-          interaction.guild,
-          panel
-        );
-      } catch (error) {
-        panel.options =
-          panel.options.filter(
-            option =>
-              option.roleId !==
-              role.id
-          );
-
-        if (
-          !panel.options.length
-        ) {
-          delete d.reactionRoles[
-            messageId
-          ];
-        }
-
-        saveData();
-
+        await target.edit({
+          components:
+            makeReactionRoleComponents(
+              panel
+            )
+        });
+      } catch {
         return interaction.reply({
           content:
-            `❌ No pude agregar el menú/botón al mensaje.\nRevisa el emoji y el ID del mensaje.\n\nError: \`${error.message}\``,
+            "❌ No pude editar ese mensaje. El mensaje debe haber sido enviado por Fusake.",
           ephemeral: true
         });
       }
 
       return interaction.reply({
-        embeds: [
-          new EmbedBuilder()
-            .setColor(0x2ecc71)
-            .setTitle(
-              "✅ ROL INTERACTIVO AGREGADO"
-            )
-            .setDescription(
-              `🎭 **Rol:** ${role}
-${emoji} **Opción:** ${label}
-🎛️ **Tipo:** ${
-                type === "MENU"
-                  ? "Menú desplegable"
-                  : "Botón"
-              }
-🆔 **Mensaje:** \`${messageId}\`
-
-${
-  type === "MENU"
-    ? "♟️ Los usuarios solo podrán tener **1 rol de este menú**. Si eligen otro, Fusake quitará automáticamente el anterior."
-    : "🃏 Los usuarios podrán elegir **todos los roles que quieran**. Si vuelven a pulsar un botón, Fusake les quitará ese rol."
-}`
-            )
-        ],
+        content:
+          `✅ Rol interactivo agregado.\n🎭 ${role}\n${emoji} ${label}`,
         ephemeral: true
       });
     }
 
     // ==================================================
-    // SORTEOS SLASH
+    // /SORTEO
     // ==================================================
 
-    if (cmd === "sorteo") {
+    if (
+      interaction.commandName ===
+      "sorteo"
+    ) {
       const timeText =
-        interaction.options.getString(
-          "tiempo",
-          true
-        );
+        interaction.options
+          .getString(
+            "tiempo",
+            true
+          );
 
       const winners =
-        interaction.options.getInteger(
-          "ganadores",
-          true
-        );
+        interaction.options
+          .getInteger(
+            "ganadores",
+            true
+          );
 
       const prize =
-        interaction.options.getString(
-          "premio",
-          true
-        );
+        interaction.options
+          .getString(
+            "premio",
+            true
+          );
 
-      const requirementsText =
-        interaction.options.getString(
-          "requisitos"
-        ) || "";
+      const requirements =
+        interaction.options
+          .getString(
+            "requisitos"
+          ) || "";
 
       const time =
-        parseDuration(timeText);
+        parseDuration(
+          timeText
+        );
 
       if (!time) {
         return interaction.reply({
           content:
-            "❌ Tiempo inválido. Ejemplos: `30m`, `1h`, `1h30m`, `2d`.",
-          ephemeral: true
-        });
-      }
-
-      const parsedRequirements =
-        parseRequirements(
-          requirementsText
-        );
-
-      if (
-        requirementsText &&
-        !parsedRequirements.invites &&
-        !parsedRequirements.messages
-      ) {
-        return interaction.reply({
-          content:
-            "❌ No entendí los requisitos.\n\nEjemplos:\n`5 invites`\n`1000 mensajes`\n`5 invites, 1000 mensajes`",
+            "❌ Tiempo inválido. Ejemplo: `1h30m`.",
           ephemeral: true
         });
       }
@@ -5549,12 +6608,12 @@ ${
             time,
             winners,
             prize,
-            requirementsText
+            requirements
           );
 
         return interaction.reply({
           content:
-            `🎉 Sorteo creado.\n🆔 ID: \`${giveaway.id}\``,
+            `🎉 Sorteo creado.\n🆔 \`${giveaway.id}\``,
           ephemeral: true
         });
       } catch {
@@ -5566,16 +6625,20 @@ ${
       }
     }
 
-    if (cmd === "sorteo-end") {
-      const id =
-        interaction.options.getString(
-          "id",
-          true
-        );
+    // ==================================================
+    // /SORTEO-END
+    // ==================================================
 
-      await interaction.deferReply({
-        ephemeral: true
-      });
+    if (
+      interaction.commandName ===
+      "sorteo-end"
+    ) {
+      const id =
+        interaction.options
+          .getString(
+            "id",
+            true
+          );
 
       const result =
         await endGiveaway(
@@ -5583,23 +6646,29 @@ ${
           id
         );
 
-      return interaction.editReply(
-        result.ok
-          ? "🎉 Sorteo finalizado."
-          : result.message
-      );
-    }
-
-    if (cmd === "sorteo-reroll") {
-      const id =
-        interaction.options.getString(
-          "id",
-          true
-        );
-
-      await interaction.deferReply({
+      return interaction.reply({
+        content:
+          result.ok
+            ? "🎉 Sorteo finalizado."
+            : result.message,
         ephemeral: true
       });
+    }
+
+    // ==================================================
+    // /SORTEO-REROLL
+    // ==================================================
+
+    if (
+      interaction.commandName ===
+      "sorteo-reroll"
+    ) {
+      const id =
+        interaction.options
+          .getString(
+            "id",
+            true
+          );
 
       const result =
         await endGiveaway(
@@ -5608,44 +6677,48 @@ ${
           true
         );
 
-      return interaction.editReply(
-        result.ok
-          ? "🔄 Nuevos ganadores seleccionados."
-          : result.message
-      );
+      return interaction.reply({
+        content:
+          result.ok
+            ? "🔄 Nuevos ganadores seleccionados."
+            : result.message,
+        ephemeral: true
+      });
     }
 
     // ==================================================
-    // MODERACIÓN SLASH
+    // /BAN
     // ==================================================
 
-    if (cmd === "ban") {
+    if (
+      interaction.commandName ===
+      "ban"
+    ) {
       const user =
-        interaction.options.getUser(
-          "usuario",
-          true
-        );
+        interaction.options
+          .getUser(
+            "usuario",
+            true
+          );
 
       const reason =
-        interaction.options.getString(
-          "razon"
-        ) ||
-        "Sin razón especificada";
+        interaction.options
+          .getString(
+            "razon"
+          ) ||
+        "Sin razón especificada.";
 
       const member =
         await interaction.guild.members
           .fetch(user.id)
-          .catch(() => null);
+          .catch(
+            () => null
+          );
 
-      if (!member) {
-        return interaction.reply({
-          content:
-            "❌ Usuario no encontrado.",
-          ephemeral: true
-        });
-      }
-
-      if (!member.bannable) {
+      if (
+        !member ||
+        !member.bannable
+      ) {
         return interaction.reply({
           content:
             "❌ No puedo banear a ese usuario.",
@@ -5653,53 +6726,60 @@ ${
         });
       }
 
-      try {
-        await member.ban({
-          reason
-        });
+      await member.ban({
+        reason
+      });
 
-        await sendLog(
-          interaction.guild,
-          "USUARIO BANEADO",
-          `**Usuario:** ${user.tag}
-**Moderador:** ${interaction.user.tag}
-**Razón:** ${reason}`,
-          0xe74c3c
-        );
+      await sendLog(
+        interaction.guild,
+        "Usuario baneado",
+        `👤 Usuario: **${user.tag}**
+🆔 ID: \`${user.id}\`
+👑 Moderador: ${interaction.user}
+📝 Razón: ${reason}`,
+        0xe74c3c
+      );
 
-        return interaction.reply({
-          content:
-            `🔨 **${user.tag}** fue baneado.`,
-          ephemeral: true
-        });
-      } catch {
-        return interaction.reply({
-          content:
-            "❌ No pude banear al usuario.",
-          ephemeral: true
-        });
-      }
+      return interaction.reply({
+        content:
+          `🔨 **${user.tag}** fue baneado.`,
+        ephemeral: true
+      });
     }
 
-    if (cmd === "kick") {
+    // ==================================================
+    // /KICK
+    // ==================================================
+
+    if (
+      interaction.commandName ===
+      "kick"
+    ) {
       const user =
-        interaction.options.getUser(
-          "usuario",
-          true
-        );
+        interaction.options
+          .getUser(
+            "usuario",
+            true
+          );
 
       const reason =
-        interaction.options.getString(
-          "razon"
-        ) ||
-        "Sin razón especificada";
+        interaction.options
+          .getString(
+            "razon"
+          ) ||
+        "Sin razón especificada.";
 
       const member =
         await interaction.guild.members
           .fetch(user.id)
-          .catch(() => null);
+          .catch(
+            () => null
+          );
 
-      if (!member?.kickable) {
+      if (
+        !member ||
+        !member.kickable
+      ) {
         return interaction.reply({
           content:
             "❌ No puedo expulsar a ese usuario.",
@@ -5707,50 +6787,60 @@ ${
         });
       }
 
-      try {
-        await member.kick(reason);
+      await member.kick(
+        reason
+      );
 
-        await sendLog(
-          interaction.guild,
-          "USUARIO EXPULSADO",
-          `**Usuario:** ${user.tag}
-**Moderador:** ${interaction.user.tag}
-**Razón:** ${reason}`
-        );
+      await sendLog(
+        interaction.guild,
+        "Usuario expulsado",
+        `👤 Usuario: **${user.tag}**
+🆔 ID: \`${user.id}\`
+👑 Moderador: ${interaction.user}
+📝 Razón: ${reason}`,
+        0xe67e22
+      );
 
-        return interaction.reply({
-          content:
-            `🚪 **${user.tag}** fue expulsado.`,
-          ephemeral: true
-        });
-      } catch {
-        return interaction.reply({
-          content:
-            "❌ No pude expulsar al usuario.",
-          ephemeral: true
-        });
-      }
+      return interaction.reply({
+        content:
+          `👢 **${user.tag}** fue expulsado.`,
+        ephemeral: true
+      });
     }
 
-    if (cmd === "timeout") {
+    // ==================================================
+    // /TIMEOUT
+    // ==================================================
+
+    if (
+      interaction.commandName ===
+      "timeout"
+    ) {
       const user =
-        interaction.options.getUser(
-          "usuario",
-          true
-        );
+        interaction.options
+          .getUser(
+            "usuario",
+            true
+          );
 
       const minutes =
-        interaction.options.getInteger(
-          "minutos",
-          true
-        );
+        interaction.options
+          .getInteger(
+            "minutos",
+            true
+          );
 
       const member =
         await interaction.guild.members
           .fetch(user.id)
-          .catch(() => null);
+          .catch(
+            () => null
+          );
 
-      if (!member?.moderatable) {
+      if (
+        !member ||
+        !member.moderatable
+      ) {
         return interaction.reply({
           content:
             "❌ No puedo aplicar timeout a ese usuario.",
@@ -5758,39 +6848,59 @@ ${
         });
       }
 
-      try {
-        await member.timeout(
+      const ms =
+        Math.min(
           minutes * 60000,
-          `Aplicado por ${interaction.user.tag}`
+          28 * 24 * 60 * 60 * 1000
         );
 
-        return interaction.reply({
-          content:
-            `⏳ **${user.tag}** recibió timeout de **${minutes} minutos**.`,
-          ephemeral: true
-        });
-      } catch {
-        return interaction.reply({
-          content:
-            "❌ No pude aplicar el timeout.",
-          ephemeral: true
-        });
-      }
+      await member.timeout(
+        ms,
+        `Aplicado por ${interaction.user.tag}`
+      );
+
+      await sendLog(
+        interaction.guild,
+        "Timeout aplicado",
+        `👤 Usuario: ${member}
+⏱️ Duración: **${duration(ms)}**
+👑 Moderador: ${interaction.user}`,
+        0xf39c12
+      );
+
+      return interaction.reply({
+        content:
+          `⏱️ Timeout aplicado durante **${duration(ms)}**.`,
+        ephemeral: true
+      });
     }
 
-    if (cmd === "untimeout") {
+    // ==================================================
+    // /UNTIMEOUT
+    // ==================================================
+
+    if (
+      interaction.commandName ===
+      "untimeout"
+    ) {
       const user =
-        interaction.options.getUser(
-          "usuario",
-          true
-        );
+        interaction.options
+          .getUser(
+            "usuario",
+            true
+          );
 
       const member =
         await interaction.guild.members
           .fetch(user.id)
-          .catch(() => null);
+          .catch(
+            () => null
+          );
 
-      if (!member?.moderatable) {
+      if (
+        !member ||
+        !member.moderatable
+      ) {
         return interaction.reply({
           content:
             "❌ No puedo modificar a ese usuario.",
@@ -5798,29 +6908,31 @@ ${
         });
       }
 
-      try {
-        await member.timeout(null);
+      await member.timeout(
+        null
+      );
 
-        return interaction.reply({
-          content:
-            `🃏 Timeout retirado a **${user.tag}**.`,
-          ephemeral: true
-        });
-      } catch {
-        return interaction.reply({
-          content:
-            "❌ No pude retirar el timeout.",
-          ephemeral: true
-        });
-      }
+      return interaction.reply({
+        content:
+          `✅ Timeout retirado a ${member}.`,
+        ephemeral: true
+      });
     }
 
-    if (cmd === "purge") {
+    // ==================================================
+    // /PURGE
+    // ==================================================
+
+    if (
+      interaction.commandName ===
+      "purge"
+    ) {
       const amount =
-        interaction.options.getInteger(
-          "cantidad",
-          true
-        );
+        interaction.options
+          .getInteger(
+            "cantidad",
+            true
+          );
 
       await interaction.deferReply({
         ephemeral: true
@@ -5828,13 +6940,14 @@ ${
 
       try {
         const deleted =
-          await interaction.channel.bulkDelete(
-            amount,
-            true
-          );
+          await interaction.channel
+            .bulkDelete(
+              amount,
+              true
+            );
 
         return interaction.editReply(
-          `♟️🧹 Se eliminaron **${deleted.size} mensajes**.`
+          `🧹 Eliminados **${deleted.size}** mensajes.`
         );
       } catch {
         return interaction.editReply(
@@ -5844,51 +6957,106 @@ ${
     }
 
     // ==================================================
-    // INFORMACIÓN SLASH
+    // /SERVERINFO
     // ==================================================
 
-    if (cmd === "serverinfo") {
+    if (
+      interaction.commandName ===
+      "serverinfo"
+    ) {
+      const guild =
+        interaction.guild;
+
       return interaction.reply({
         embeds: [
           new EmbedBuilder()
-            .setColor(0x3498db)
+            .setColor(
+              0xf1c40f
+            )
             .setTitle(
-              `♟️🃏 ${interaction.guild.name}`
+              `♟️🃏 ${guild.name}`
             )
             .setThumbnail(
-              interaction.guild.iconURL()
+              guild.iconURL()
             )
-            .setDescription(
-              `👑 Dueño: <@${interaction.guild.ownerId}>
-👥 Miembros: ${interaction.guild.memberCount}
-💬 Canales: ${interaction.guild.channels.cache.size}
-🎭 Roles: ${interaction.guild.roles.cache.size}
-😀 Emojis: ${interaction.guild.emojis.cache.size}
-🚀 Boosts: ${interaction.guild.premiumSubscriptionCount || 0}`
+            .addFields(
+              {
+                name:
+                  "👑 Dueño",
+                value:
+                  `<@${guild.ownerId}>`,
+                inline:
+                  true
+              },
+              {
+                name:
+                  "👥 Miembros",
+                value:
+                  `${guild.memberCount}`,
+                inline:
+                  true
+              },
+              {
+                name:
+                  "🎭 Roles",
+                value:
+                  `${guild.roles.cache.size}`,
+                inline:
+                  true
+              },
+              {
+                name:
+                  "📺 Canales",
+                value:
+                  `${guild.channels.cache.size}`,
+                inline:
+                  true
+              }
             )
         ],
         ephemeral: true
       });
     }
 
-    if (cmd === "userinfo") {
+    // ==================================================
+    // /USERINFO
+    // ==================================================
+
+    if (
+      interaction.commandName ===
+      "userinfo"
+    ) {
       const user =
-        interaction.options.getUser(
-          "usuario"
-        ) ||
+        interaction.options
+          .getUser(
+            "usuario"
+          ) ||
         interaction.user;
 
       const member =
         await interaction.guild.members
           .fetch(user.id)
-          .catch(() => null);
+          .catch(
+            () => null
+          );
+
+      if (!member) {
+        return interaction.reply({
+          content:
+            "❌ No encontré ese usuario.",
+          ephemeral: true
+        });
+      }
 
       return interaction.reply({
         embeds: [
           new EmbedBuilder()
-            .setColor(0x3498db)
+            .setColor(
+              member.displayColor ||
+                0x3498db
+            )
             .setTitle(
-              `♟️🃏 ${user.tag}`
+              `👤 ${user.tag}`
             )
             .setThumbnail(
               user.displayAvatarURL()
@@ -5896,27 +7064,21 @@ ${
             .addFields(
               {
                 name: "🆔 ID",
-                value: user.id,
-                inline: true
+                value:
+                  user.id
               },
               {
                 name:
                   "📅 Cuenta creada",
                 value:
-                  `<t:${Math.floor(
-                    user.createdTimestamp /
-                      1000
-                  )}:F>`
+                  `<t:${Math.floor(user.createdTimestamp / 1000)}:F>`
               },
               {
                 name:
-                  "🏠 Entró al servidor",
+                  "🏠 Entró",
                 value:
-                  member?.joinedTimestamp
-                    ? `<t:${Math.floor(
-                        member.joinedTimestamp /
-                          1000
-                      )}:F>`
+                  member.joinedTimestamp
+                    ? `<t:${Math.floor(member.joinedTimestamp / 1000)}:F>`
                     : "Desconocido"
               }
             )
@@ -5928,22 +7090,26 @@ ${
 );
 
 // ======================================================
-// SERVIDOR HTTP
+// SERVIDOR WEB PARA HOSTING
 // ======================================================
 
 const PORT =
-  process.env.PORT || 3000;
+  process.env.PORT ||
+  8080;
 
 http
   .createServer(
     (req, res) => {
-      res.writeHead(200, {
-        "Content-Type":
-          "text/plain; charset=utf-8"
-      });
+      res.writeHead(
+        200,
+        {
+          "Content-Type":
+            "text/plain; charset=utf-8"
+        }
+      );
 
       res.end(
-        "♟️🃏 Fusake online • 🤖 Gemini conectado"
+        "♟️🃏 Fusake está online."
       );
     }
   )
@@ -5955,6 +7121,30 @@ http
       );
     }
   );
+
+// ======================================================
+// ERRORES
+// ======================================================
+
+process.on(
+  "unhandledRejection",
+  error => {
+    console.error(
+      "❌ Unhandled Rejection:",
+      error
+    );
+  }
+);
+
+process.on(
+  "uncaughtException",
+  error => {
+    console.error(
+      "❌ Uncaught Exception:",
+      error
+    );
+  }
+);
 
 // ======================================================
 // LOGIN
