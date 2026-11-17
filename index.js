@@ -2682,40 +2682,19 @@ client.on(
         c?.isTextBased()
       ) {
         await c.send({
+          content: `${member}`,
           embeds: [
             new EmbedBuilder()
               .setColor(
                 0xf1c40f
               )
-              .setTitle(
-                "♟️🃏 ¡NUEVO JUGADOR EN LA MESA! 🃏♟️"
-              )
               .setDescription(
-                `¡Bienvenido ${member} 👋
-
-Has entrado a ―═★❯❯ RƐɗ KɪƝƓS ♦ .! .
-
-♟️ Mueve tus piezas con estrategia.
-🃏 Juega tus cartas con inteligencia.
-
-¡Esperamos que disfrutes de la comunidad! 🎉🎊
-
-♣️ Pásate por <#1533949497812586646> <#1516922343195148520> <#1523782602379624662> para saber más de ti!!!!
-
-♟️ Tu próximo movimiento puede cambiar la partida 🃏`
+                "⛦.·:*¨ ✘♚✘ ¨*:·..·:* *:·.♥️♦️♣️♠️Bienvenido a Red kings ♥️♦️♣️♠️.·:* *:·.\n.·:*¨ ✘♚✘ ¨*:·.⛥"
               )
-              .setThumbnail(
-                member.user
-                  .displayAvatarURL()
-              )
-              .setFooter({
-                text:
-                  "♟️ Tu próximo movimiento puede cambiar la partida 🃏"
-              })
-              .setTimestamp()
           ],
 
           allowedMentions: {
+            parse: [],
             users: [
               member.id
             ]
@@ -3203,7 +3182,8 @@ A partir de ahora **b!n** solamente funcionará en ${channel}.`
     }
 
     if (
-      cmd === "bienvenida"
+      cmd === "bienvenida" ||
+      cmd === "setbien"
     ) {
       if (
         args[0]?.toLowerCase() ===
@@ -3224,9 +3204,9 @@ A partir de ahora **b!n** solamente funcionará en ${channel}.`
           message
         );
 
-      if (!c) {
+      if (!c || !c.isTextBased()) {
         return reply(
-          `❌ Usa **${PREFIX}bienvenida #canal** o **${PREFIX}bienvenida off**`
+          `❌ Usa **${PREFIX}setbien #canal** o **${PREFIX}setbien off**`
         );
       }
 
