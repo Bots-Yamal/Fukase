@@ -2689,7 +2689,7 @@ client.on(
                 0xf1c40f
               )
               .setDescription(
-                "¡Bienvenido/a @${member}👋
+                `¡Bienvenido/a <@${member.id}> 👋
 
 Has entrado a ―═★❯❯ RƐɗ KɪƝƓS ♦ .! .
 
@@ -2700,7 +2700,7 @@ Has entrado a ―═★❯❯ RƐɗ KɪƝƓS ♦ .! .
 
 ♣️ Pásate por <#1533949497812586646> <#1516922343195148520> <#1523782602379624662> para saber más de ti!!!!
 
-♟️ Tu próximo movimiento puede cambiar la partida 🃏"
+♟️ Tu próximo movimiento puede cambiar la partida 🃏`
               )
           ],
 
