@@ -2689,7 +2689,18 @@ client.on(
                 0xf1c40f
               )
               .setDescription(
-                "⛦.·:*¨ ✘♚✘ ¨*:·..·:* *:·.♥️♦️♣️♠️Bienvenido a Red kings ♥️♦️♣️♠️.·:* *:·.\n.·:*¨ ✘♚✘ ¨*:·.⛥"
+                "¡Bienvenido/a @${member}👋
+
+Has entrado a ―═★❯❯ RƐɗ KɪƝƓS ♦ .! .
+
+♟️ Mueve tus piezas con estrategia.
+🃏 Juega tus cartas con inteligencia.
+
+¡Esperamos que disfrutes de la comunidad! 🎉🎊
+
+♣️ Pásate por <#1533949497812586646> <#1516922343195148520> <#1523782602379624662> para saber más de ti!!!!
+
+♟️ Tu próximo movimiento puede cambiar la partida 🃏"
               )
           ],
 
